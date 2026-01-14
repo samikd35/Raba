@@ -145,3 +145,85 @@ class WorkflowRepository:
 def get_workflow_repository() -> WorkflowRepository:
     """Get WorkflowRepository instance."""
     return WorkflowRepository()
+
+
+class SupabaseService:
+    """
+    Unified Supabase service for database and storage operations.
+    
+    Reference: PHASE2_3_DEEP_RESEARCH_PLAN.md
+    """
+    
+    def __init__(self):
+        self._client: Optional[Client] = None
+        self._workflow_repo: Optional[WorkflowRepository] = None
+        self._logger = get_logger(f"{__name__}.SupabaseService")
+    
+    @property
+    def client(self) -> Client:
+        """Get Supabase client."""
+        if self._client is None:
+            self._client = get_supabase_client()
+        return self._client
+    
+    @property
+    def workflows(self) -> WorkflowRepository:
+        """Get workflow repository."""
+        if self._workflow_repo is None:
+            self._workflow_repo = WorkflowRepository(self.client)
+        return self._workflow_repo
+    
+    async def update_workflow(
+        self,
+        workflow_id: str,
+        updates: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Update a workflow record."""
+        return await self.workflows.update(workflow_id, updates)
+    
+    async def upload_file(
+        self,
+        bucket: str,
+        path: str,
+        file_data: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> Optional[str]:
+        """
+        Upload file to Supabase Storage.
+        
+        Args:
+            bucket: Storage bucket name
+            path: File path within bucket
+            file_data: File bytes
+            content_type: MIME type
+            
+        Returns:
+            Public URL if successful, None otherwise
+        """
+        try:
+            self._logger.info(f"Uploading to {bucket}/{path}")
+            
+            self.client.storage.from_(bucket).upload(
+                path=path,
+                file=file_data,
+                file_options={"content-type": content_type},
+            )
+            
+            public_url = self.client.storage.from_(bucket).get_public_url(path)
+            self._logger.info(f"Upload successful: {path}")
+            return public_url
+            
+        except Exception as e:
+            self._logger.error(f"Upload failed: {e}")
+            return None
+
+
+_supabase_service: Optional[SupabaseService] = None
+
+
+def get_supabase_service() -> SupabaseService:
+    """Get singleton SupabaseService instance."""
+    global _supabase_service
+    if _supabase_service is None:
+        _supabase_service = SupabaseService()
+    return _supabase_service

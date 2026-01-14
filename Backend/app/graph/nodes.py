@@ -99,30 +99,157 @@ async def deep_research_node(state: VideoGenerationState) -> dict:
     """
     LangGraph node for Deep Research.
     
-    Placeholder - to be implemented in Phase 2.3.
+    Routes between factual, creative, and hybrid research strategies based on
+    content type determined from intent_type and topic analysis.
+    
+    Input from state:
+        - topic: User's video topic
+        - intent_metadata: From Intent/Tool Selector (includes intent_type, tone)
+        - selected_tool: Selected tool with category
+        - duration_seconds: Video duration
+        - workflow_id: For storage organization
+        
+    Output to state:
+        - research_data: Research output (factual, creative, or hybrid)
+        - research_images: List of image URLs from search
+        
+    Reference: PHASE2_3_DEEP_RESEARCH_PLAN.md
     """
-    logger.info("NODE: Deep Research - PLACEHOLDER")
-    return {
-        "phase_timestamps": {
-            **state.get("phase_timestamps", {}),
-            "deep_research_placeholder": utc_now_iso(),
-        },
-    }
+    logger.info("=" * 60)
+    logger.info("NODE: Deep Research - Starting")
+    logger.info("=" * 60)
+    
+    workflow_id = state.get("workflow_id", "unknown")
+    topic = state.get("topic", "")
+    
+    logger.info(f"Workflow ID: {workflow_id}")
+    logger.info(f"Topic: {topic[:50]}...")
+    
+    try:
+        from app.agents.deep_research import get_deep_research_agent
+        agent = get_deep_research_agent()
+        updated_state = await agent.research(state)
+        
+        research_data = updated_state.get("research_data", {})
+        research_images = updated_state.get("research_images", [])
+        strategy = research_data.get("strategy_used", "unknown")
+        
+        logger.info(f"Strategy used: {strategy}")
+        logger.info(f"Images found: {len(research_images)}")
+        logger.info(f"Is fictional: {research_data.get('is_fictional', False)}")
+        
+        state_update = {
+            "research_data": research_data,
+            "research_images": research_images,
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "deep_research_completed": utc_now_iso(),
+            },
+        }
+        
+        logger.info("NODE: Deep Research - Complete")
+        logger.info("=" * 60)
+        
+        return state_update
+        
+    except Exception as e:
+        logger.error(f"Deep Research failed: {e}")
+        
+        return {
+            "error": f"Deep Research failed: {str(e)}",
+            "error_details": {
+                "node": "deep_research",
+                "exception": str(e),
+                "timestamp": utc_now_iso(),
+            },
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "deep_research_failed": utc_now_iso(),
+            },
+        }
 
 
 async def script_writer_node(state: VideoGenerationState) -> dict:
     """
     LangGraph node for Script Writer.
     
-    Placeholder - to be implemented in Phase 2.4.
+    Generates a viral-optimized script from research data using the selected
+    tool's style specifications.
+    
+    Input from state:
+        - topic: User's video topic
+        - research_data: From Deep Research (factual/creative/hybrid)
+        - selected_tool: Tool metadata with style specs
+        - intent_metadata: Intent type, tone, target audience
+        - duration_seconds: Video duration
+        
+    Output to state:
+        - script_output: Complete script as dict
+        - hook: Hook section extracted
+        - scenes: List of scenes extracted
+        - call_to_action: CTA section extracted
+        - viral_score: Calculated viral score
+        
+    Reference: PHASE2_4_SCRIPT_GENERATOR_PLAN.md
     """
-    logger.info("NODE: Script Writer - PLACEHOLDER")
-    return {
-        "phase_timestamps": {
-            **state.get("phase_timestamps", {}),
-            "script_writer_placeholder": utc_now_iso(),
-        },
-    }
+    logger.info("=" * 60)
+    logger.info("NODE: Script Writer - Starting")
+    logger.info("=" * 60)
+    
+    workflow_id = state.get("workflow_id", "unknown")
+    topic = state.get("topic", "")
+    duration = state.get("duration_seconds", 18)
+    
+    logger.info(f"Workflow ID: {workflow_id}")
+    logger.info(f"Topic: {topic[:50]}...")
+    logger.info(f"Duration: {duration}s")
+    
+    try:
+        from app.agents.script_writer import get_script_writer_agent
+        
+        agent = get_script_writer_agent()
+        result = await agent.run(state)
+        
+        script_output = result.get("script_output", {})
+        viral_score = result.get("viral_score", 0.0)
+        scenes_count = len(result.get("scenes", []))
+        
+        logger.info(f"Script generated successfully")
+        logger.info(f"Viral score: {viral_score:.2f}")
+        logger.info(f"Scenes: {scenes_count}")
+        
+        state_update = {
+            "script_output": script_output,
+            "hook": result.get("hook"),
+            "scenes": result.get("scenes"),
+            "call_to_action": result.get("call_to_action"),
+            "viral_score": viral_score,
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "script_writer_completed": utc_now_iso(),
+            },
+        }
+        
+        logger.info("NODE: Script Writer - Complete")
+        logger.info("=" * 60)
+        
+        return state_update
+        
+    except Exception as e:
+        logger.error(f"Script Writer failed: {e}")
+        
+        return {
+            "error": f"Script Writer failed: {str(e)}",
+            "error_details": {
+                "node": "script_writer",
+                "exception": str(e),
+                "timestamp": utc_now_iso(),
+            },
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "script_writer_failed": utc_now_iso(),
+            },
+        }
 
 
 async def image_generator_node(state: VideoGenerationState) -> dict:

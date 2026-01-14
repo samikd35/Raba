@@ -1,8 +1,10 @@
 """RABA Redis Service.
 
 Provides Redis client for caching operations.
+Includes research-specific caching for Phase 2.3.
 """
 
+import json
 from typing import Any, Optional
 
 import redis
@@ -130,6 +132,122 @@ class CacheService:
         """Check if key exists in cache."""
         full_key = self._make_key(key)
         return bool(self.client.exists(full_key))
+
+
+class RedisService:
+    """
+    Enhanced Redis service with JSON support for research caching.
+    
+    Reference: PHASE2_3_DEEP_RESEARCH_PLAN.md Step 7
+    """
+    
+    PREFIX = "raba:"
+    
+    def __init__(self):
+        self._client: Optional[redis.Redis] = None
+        self._logger = get_logger(f"{__name__}.RedisService")
+    
+    @property
+    def client(self) -> Optional[redis.Redis]:
+        """Get Redis client (lazy initialization)."""
+        if self._client is None:
+            if not settings.redis_url:
+                self._logger.warning("Redis URL not configured")
+                return None
+            try:
+                self._client = get_redis_client()
+            except Exception as e:
+                self._logger.warning(f"Redis connection failed: {e}")
+                return None
+        return self._client
+    
+    def _make_key(self, key: str) -> str:
+        """Create prefixed cache key."""
+        return f"{self.PREFIX}{key}"
+    
+    async def get(self, key: str) -> Optional[dict]:
+        """
+        Get JSON value from cache.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            Deserialized dict or None
+        """
+        if not self.client:
+            return None
+        
+        full_key = self._make_key(key)
+        self._logger.debug(f"Cache GET: {full_key}")
+        
+        try:
+            value = self.client.get(full_key)
+            if value:
+                self._logger.debug(f"Cache HIT: {full_key}")
+                return json.loads(value)
+            self._logger.debug(f"Cache MISS: {full_key}")
+            return None
+        except Exception as e:
+            self._logger.warning(f"Cache GET failed: {e}")
+            return None
+    
+    async def set(
+        self,
+        key: str,
+        value: dict,
+        ttl: Optional[int] = None,
+    ) -> bool:
+        """
+        Set JSON value in cache.
+        
+        Args:
+            key: Cache key
+            value: Dict to cache (will be JSON serialized)
+            ttl: Time-to-live in seconds
+            
+        Returns:
+            True if successful
+        """
+        if not self.client:
+            return False
+        
+        full_key = self._make_key(key)
+        self._logger.debug(f"Cache SET: {full_key} (TTL: {ttl}s)")
+        
+        try:
+            json_value = json.dumps(value, default=str)
+            if ttl:
+                self.client.setex(full_key, ttl, json_value)
+            else:
+                self.client.set(full_key, json_value)
+            return True
+        except Exception as e:
+            self._logger.warning(f"Cache SET failed: {e}")
+            return False
+    
+    async def delete(self, key: str) -> bool:
+        """Delete value from cache."""
+        if not self.client:
+            return False
+        
+        full_key = self._make_key(key)
+        try:
+            return bool(self.client.delete(full_key))
+        except Exception as e:
+            self._logger.warning(f"Cache DELETE failed: {e}")
+            return False
+
+
+_redis_service: Optional[RedisService] = None
+
+
+def get_redis_service() -> RedisService:
+    """Get singleton RedisService instance."""
+    global _redis_service
+    if _redis_service is None:
+        _redis_service = RedisService()
+    return _redis_service
 
 
 def get_cache_service() -> CacheService:
