@@ -10,6 +10,17 @@ from app.services.gemini import (
     GeminiValidationError,
     get_gemini_service,
 )
+from app.services.tool_enhancer import (
+    ToolEnhancerService,
+    get_tool_enhancer,
+)
+from app.services.tool_executor import (
+    ParameterValidationError,
+    TemplateRenderError,
+    ToolExecutionError,
+    ToolExecutor,
+    get_tool_executor,
+)
 
 __all__ = [
     "GeminiAPIError",
@@ -17,4 +28,11 @@ __all__ = [
     "GeminiServiceError",
     "GeminiValidationError",
     "get_gemini_service",
+    "ToolEnhancerService",
+    "get_tool_enhancer",
+    "ToolExecutor",
+    "ToolExecutionError",
+    "TemplateRenderError",
+    "ParameterValidationError",
+    "get_tool_executor",
 ]

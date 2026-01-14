@@ -249,6 +249,8 @@ class IntentToolOutput(BaseModel):
 | **2.2.7** | Seed initial tools | Insert tools into database | `scripts/seed_tools.py` | 20 min |
 | **2.2.8** | Test tool registry | Verify lookup and scoring | `tests/test_tools.py` | 30 min |
 
+> **See**: [PHASE2_2_TOOL_REPOSITORY_PLAN.md](./PHASE2_2_TOOL_REPOSITORY_PLAN.md) for detailed implementation plan
+
 ### 2.3 Deep Research Agent
 
 > **Depends on**: Intent/Tool Selector (needs topic and tool context)

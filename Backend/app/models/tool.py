@@ -372,3 +372,244 @@ class ToolRelevanceResponse(BaseModel):
         ...,
         description="Brief explanation of the score"
     )
+
+
+# =============================================================================
+# Phase 2.2: Tool Repository System Models
+# =============================================================================
+
+class ToolCreate(BaseModel):
+    """
+    Request schema for creating a new tool.
+    
+    User provides a simple idea and optional hints.
+    Gemini 2.5 Flash will enhance this into a full tool structure.
+    """
+    
+    tool_name: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        description="Display name for the tool"
+    )
+    idea: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000,
+        description="Description of what this tool should do and its visual style"
+    )
+    category: Optional[CategoryEnum] = Field(
+        default=None,
+        description="Optional category hint. If not provided, AI will classify."
+    )
+
+
+class ToolUpdate(BaseModel):
+    """
+    Request schema for updating an existing tool.
+    
+    All fields are optional - only provided fields will be updated.
+    If 'idea' is changed, tool will be re-enhanced by Gemini.
+    """
+    
+    tool_name: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=100,
+        description="Updated display name"
+    )
+    idea: Optional[str] = Field(
+        default=None,
+        min_length=10,
+        max_length=2000,
+        description="Updated idea - will trigger re-enhancement"
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description="Updated description (manual override)"
+    )
+    capabilities: Optional[ToolCapabilities] = Field(
+        default=None,
+        description="Updated capabilities"
+    )
+    is_active: Optional[bool] = Field(
+        default=None,
+        description="Enable/disable tool"
+    )
+    script_prompt_template: Optional[str] = Field(
+        default=None,
+        description="Updated script prompt template"
+    )
+    image_prompt_template: Optional[str] = Field(
+        default=None,
+        description="Updated image prompt template"
+    )
+    video_prompt_template: Optional[str] = Field(
+        default=None,
+        description="Updated video prompt template"
+    )
+    priority: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=1000,
+        description="Selection priority (higher = preferred)"
+    )
+
+
+class ToolImproveRequest(BaseModel):
+    """
+    Request schema for improving an existing tool.
+    
+    User provides feedback/suggestions, and Gemini will
+    enhance the tool while preserving what works.
+    """
+    
+    improvement_suggestion: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000,
+        description="What should be improved about this tool"
+    )
+    preserve_templates: bool = Field(
+        default=False,
+        description="If true, keep existing prompt templates and only update description/capabilities"
+    )
+
+
+class ImprovementRecord(BaseModel):
+    """Record of a tool improvement."""
+    
+    timestamp: str = Field(..., description="ISO timestamp of improvement")
+    previous_version: int = Field(..., description="Version before improvement")
+    suggestion: str = Field(..., description="User's improvement suggestion")
+    changes_made: str = Field(..., description="Summary of changes applied")
+
+
+class ToolEnhancementResponse(BaseModel):
+    """
+    Response schema from Gemini tool enhancement.
+    
+    This is what Gemini returns when enhancing a tool idea.
+    """
+    
+    tool_id: str = Field(
+        ...,
+        description="Generated unique slug identifier (lowercase, underscores)"
+    )
+    tool_name: str = Field(
+        ...,
+        description="Polished display name"
+    )
+    category: CategoryEnum = Field(
+        ...,
+        description="Classified category"
+    )
+    description: str = Field(
+        ...,
+        description="Enhanced description (2-3 sentences)"
+    )
+    capabilities: ToolCapabilities = Field(
+        ...,
+        description="Generated capability flags"
+    )
+    script_prompt_template: str = Field(
+        ...,
+        description="Template for script generation with {topic}, {tone}, {duration} placeholders"
+    )
+    image_prompt_template: str = Field(
+        ...,
+        description="Template for image generation with {scene_description}, {style} placeholders"
+    )
+    video_prompt_template: str = Field(
+        ...,
+        description="Template for video generation with {script}, {duration} placeholders"
+    )
+    parameters_schema: dict[str, Any] = Field(
+        ...,
+        description="JSON Schema for tool parameters"
+    )
+    reasoning: str = Field(
+        ...,
+        description="Explanation of design choices"
+    )
+
+
+class ToolResponse(BaseModel):
+    """
+    Full tool response for API endpoints.
+    
+    Includes all tool data from database.
+    """
+    
+    id: str = Field(..., description="Database UUID")
+    tool_id: str = Field(..., description="Unique slug identifier")
+    tool_name: str = Field(..., description="Display name")
+    category: str = Field(..., description="Visual style category")
+    description: Optional[str] = Field(default=None, description="Tool description")
+    capabilities: Optional[dict[str, Any]] = Field(default=None, description="Capability flags")
+    script_prompt_template: Optional[str] = Field(default=None, description="Script prompt template")
+    image_prompt_template: Optional[str] = Field(default=None, description="Image prompt template")
+    video_prompt_template: Optional[str] = Field(default=None, description="Video prompt template")
+    parameters_schema: Optional[dict[str, Any]] = Field(default=None, description="Parameters JSON Schema")
+    original_idea: Optional[str] = Field(default=None, description="Original user idea")
+    is_active: bool = Field(default=True, description="Whether tool is available")
+    priority: int = Field(default=0, description="Selection priority")
+    version: int = Field(default=1, description="Tool version")
+    usage_count: int = Field(default=0, description="Times used")
+    success_rate: float = Field(default=0.0, description="Success rate 0-1")
+    improvement_history: Optional[list[dict[str, Any]]] = Field(default=None, description="Improvement records")
+    created_by: Optional[str] = Field(default=None, description="Creator UUID")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last update timestamp")
+    last_improved_at: Optional[str] = Field(default=None, description="Last improvement timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class ToolListResponse(BaseModel):
+    """Paginated list of tools."""
+    
+    tools: list[ToolResponse] = Field(..., description="List of tools")
+    total: int = Field(..., description="Total count")
+    limit: int = Field(..., description="Page size")
+    offset: int = Field(..., description="Page offset")
+
+
+class ToolExecutionRequest(BaseModel):
+    """Request schema for executing a tool with a topic."""
+    
+    topic: str = Field(
+        ...,
+        min_length=3,
+        max_length=500,
+        description="Topic to generate prompts for"
+    )
+    parameters: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Tool-specific parameters (validated against tool's parameters_schema)"
+    )
+
+
+class ToolPrompts(BaseModel):
+    """Generated prompts from tool execution."""
+    
+    script_prompt: str = Field(..., description="Prompt for script generation")
+    image_prompt: str = Field(..., description="Prompt for image generation")
+    video_prompt: str = Field(..., description="Prompt for video generation")
+
+
+class ToolExecutionResponse(BaseModel):
+    """Response from tool execution."""
+    
+    tool_id: str = Field(..., description="Executed tool ID")
+    topic: str = Field(..., description="Topic used")
+    generated_prompts: ToolPrompts = Field(..., description="Generated prompts")
+    estimated_generation_time: float = Field(..., description="Estimated time in seconds")
+
+
+class DeleteResponse(BaseModel):
+    """Response for delete operations."""
+    
+    success: bool = Field(..., description="Whether deletion succeeded")
+    tool_id: str = Field(..., description="Deleted tool ID")
