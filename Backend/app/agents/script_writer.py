@@ -596,7 +596,6 @@ class ScriptWriterAgent:
                 response_model=ScriptOutput,
                 model=GEMINI_3_FLASH,
                 system_instruction=system_instruction,
-                thinking_level="medium",
                 temperature=1.0,
             )
             

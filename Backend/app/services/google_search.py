@@ -60,6 +60,31 @@ class GoogleSearchService:
         self._cx = cx or settings.google_custom_search_cx
         self._service = None
         self._supabase = get_supabase_service()
+        self._validated = False
+        
+        # Validate configuration
+        self._validate_config()
+    
+    def _validate_config(self) -> None:
+        """Validate the Custom Search configuration."""
+        # Check if CX looks like an API key (starts with AIza)
+        if self._cx and self._cx.startswith("AIza"):
+            logger.warning(
+                "GOOGLE_CUSTOM_SEARCH_CX appears to be an API key, not a CSE ID. "
+                "Please set a valid Custom Search Engine ID (format: xxx:yyy). "
+                "Image search will be disabled."
+            )
+            self._cx = None
+        
+        # Check if API key is missing
+        if not self._api_key:
+            logger.warning("GOOGLE_CUSTOM_SEARCH_API_KEY not configured. Image search disabled.")
+        
+        # Check if CX is missing
+        if not self._cx:
+            logger.warning("GOOGLE_CUSTOM_SEARCH_CX not configured. Image search disabled.")
+        
+        self._validated = bool(self._api_key and self._cx)
     
     def _get_service(self):
         """Get or create Custom Search service."""
@@ -87,8 +112,8 @@ class GoogleSearchService:
         Returns:
             List of image metadata dicts with url, title, source
         """
-        if not self._api_key or not self._cx:
-            logger.warning("Google Custom Search not configured, skipping image search")
+        if not self._validated:
+            logger.debug("Google Custom Search not properly configured, skipping image search")
             return []
         
         service = self._get_service()
@@ -103,7 +128,7 @@ class GoogleSearchService:
                     cx=self._cx,
                     searchType="image",
                     num=num_images,
-                    imgSize="large",
+                    imgSize="LARGE",
                     safe="active",
                 ).execute
             )
@@ -208,11 +233,12 @@ class GoogleSearchService:
             url_hash = hashlib.sha256(original_url.encode()).hexdigest()[:12]
             file_id = str(uuid.uuid4())[:8]
             filename = f"{url_hash}_{file_id}.jpg"
-            storage_path = f"research_images/{workflow_id}/{filename}"
+            # Path is relative to bucket - don't include bucket name in path
+            storage_path = f"{workflow_id}/{filename}"
             
             public_url = await self._supabase.upload_file(
-                bucket="research_images",
-                path=storage_path,
+                bucket="media",  # Use existing 'media' bucket
+                path=f"research_images/{storage_path}",
                 file_data=image_bytes,
                 content_type="image/jpeg",
             )
@@ -232,7 +258,7 @@ class GoogleSearchService:
         self,
         query: str,
         workflow_id: str,
-        num_images: int = 3,
+        num_images: int = 2,
     ) -> list[ResearchImage]:
         """
         Search for images, download, and store them.

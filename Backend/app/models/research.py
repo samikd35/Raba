@@ -70,6 +70,7 @@ class ResearchOutput(BaseModel):
     )
     total_sources: int = Field(default=0, description="Total number of sources cited")
     cache_hit: bool = Field(default=False, description="Whether result came from cache")
+    cached_at: Optional[str] = Field(default=None, description="ISO timestamp when cached")
     generated_at: datetime = Field(
         default_factory=datetime.utcnow,
         description="Timestamp of generation"

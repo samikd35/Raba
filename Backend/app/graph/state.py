@@ -51,11 +51,20 @@ class VideoGenerationState(TypedDict, total=False):
     video_url: Optional[str]
     video_metadata: Optional[dict[str, Any]]
     video_segments: Optional[list[dict[str, Any]]]
+    video_output: Optional[dict[str, Any]]
+    final_video_url: Optional[str]
+    
+    status: Optional[str]
+    final_output: Optional[dict[str, Any]]
+    generation_time_seconds: Optional[float]
     
     hitl_approved: dict[str, bool]
     hitl_feedback: list[dict[str, Any]]
     current_hitl_gate: Optional[str]
     regeneration_counts: dict[str, int]
+    hitl_gate_outputs: dict[str, dict[str, Any]]  # Cached outputs for review
+    pending_regeneration: Optional[str]  # Gate requesting regeneration
+    regeneration_feedback: Optional[str]  # User feedback for regeneration
     
     error: Optional[str]
     error_details: Optional[dict[str, Any]]
@@ -134,6 +143,9 @@ def create_initial_state(
         "hitl_feedback": [],
         "current_hitl_gate": None,
         "regeneration_counts": {},
+        "hitl_gate_outputs": {},
+        "pending_regeneration": None,
+        "regeneration_feedback": None,
         "error": None,
         "error_details": None,
         "started_at": utc_now_iso(),

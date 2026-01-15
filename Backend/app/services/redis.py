@@ -1,25 +1,57 @@
 """RABA Redis Service.
 
 Provides Redis client for caching operations.
-Includes research-specific caching for Phase 2.3.
+Supports cloud Redis (Redis Labs) with connection pooling.
+
+Reference: RABA_Architecture.md Section 9 - Caching Strategy
+Phase 4.3 Implementation
 """
 
 import json
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any, Optional, Union
 
 import redis
+from redis import ConnectionPool
 
 from app.config import settings
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+_connection_pool: Optional[ConnectionPool] = None
+
 _redis_client: Optional[redis.Redis] = None
+
+
+def get_connection_pool() -> ConnectionPool:
+    """
+    Get or create Redis connection pool.
+    
+    Uses connection pooling for better performance with cloud Redis.
+    """
+    global _connection_pool
+    
+    if _connection_pool is None:
+        if not settings.redis_url:
+            raise ValueError("Redis URL must be configured")
+        
+        logger.info("Creating Redis connection pool...")
+        _connection_pool = ConnectionPool.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            max_connections=20,
+            socket_timeout=5.0,
+            socket_connect_timeout=5.0,
+            retry_on_timeout=True,
+        )
+    
+    return _connection_pool
 
 
 def get_redis_client() -> redis.Redis:
     """
-    Get or create Redis client instance.
+    Get or create Redis client instance with connection pooling.
     
     Returns:
         Redis client
@@ -36,20 +68,42 @@ def get_redis_client() -> redis.Redis:
         logger.error("Redis URL not configured")
         raise ValueError("Redis URL must be configured")
     
-    logger.info("Initializing Redis client...")
-    _redis_client = redis.from_url(
-        settings.redis_url,
-        decode_responses=True,
-    )
+    logger.info("Initializing Redis client with connection pool...")
+    pool = get_connection_pool()
+    _redis_client = redis.Redis(connection_pool=pool)
     
     try:
         _redis_client.ping()
         logger.info("Redis client connected successfully")
-    except redis.ConnectionError as e:
-        logger.error(f"Failed to connect to Redis: {e}")
-        raise
+    except (redis.ConnectionError, redis.AuthenticationError) as e:
+        logger.warning(f"Redis connection failed (caching disabled): {e}")
+        # Return client anyway - it will fail gracefully on each operation
+        # This allows the application to continue without caching
     
     return _redis_client
+
+
+def check_redis_health() -> dict:
+    """
+    Check Redis connection health.
+    
+    Returns:
+        Dict with status and info
+    """
+    try:
+        client = get_redis_client()
+        info = client.info("server")
+        return {
+            "status": "healthy",
+            "redis_version": info.get("redis_version"),
+            "connected_clients": info.get("connected_clients"),
+            "used_memory_human": info.get("used_memory_human"),
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+        }
 
 
 class CacheService:
@@ -136,9 +190,15 @@ class CacheService:
 
 class RedisService:
     """
-    Enhanced Redis service with JSON support for research caching.
+    Enhanced Redis service with JSON support for caching.
     
-    Reference: PHASE2_3_DEEP_RESEARCH_PLAN.md Step 7
+    Features:
+    - JSON serialization/deserialization
+    - Graceful fallback when Redis unavailable
+    - TTL management
+    - Pattern-based key operations
+    
+    Reference: RABA_Architecture.md Section 9 - Caching Strategy
     """
     
     PREFIX = "raba:"
@@ -146,6 +206,7 @@ class RedisService:
     def __init__(self):
         self._client: Optional[redis.Redis] = None
         self._logger = get_logger(f"{__name__}.RedisService")
+        self._available: Optional[bool] = None  # Cache availability status
     
     @property
     def client(self) -> Optional[redis.Redis]:
@@ -237,6 +298,115 @@ class RedisService:
         except Exception as e:
             self._logger.warning(f"Cache DELETE failed: {e}")
             return False
+    
+    async def delete_pattern(self, pattern: str) -> int:
+        """
+        Delete all keys matching a pattern.
+        
+        Used for cache invalidation (e.g., invalidate all scripts for a research).
+        
+        Args:
+            pattern: Key pattern (e.g., "script:abc123:*")
+            
+        Returns:
+            Number of keys deleted
+        """
+        if not self.client:
+            return 0
+        
+        full_pattern = self._make_key(pattern)
+        try:
+            keys = self.client.keys(full_pattern)
+            if keys:
+                deleted = self.client.delete(*keys)
+                self._logger.info(f"Deleted {deleted} keys matching {full_pattern}")
+                return deleted
+            return 0
+        except Exception as e:
+            self._logger.warning(f"Cache DELETE_PATTERN failed: {e}")
+            return 0
+    
+    async def exists(self, key: str) -> bool:
+        """Check if key exists in cache."""
+        if not self.client:
+            return False
+        
+        full_key = self._make_key(key)
+        try:
+            return bool(self.client.exists(full_key))
+        except Exception as e:
+            self._logger.warning(f"Cache EXISTS failed: {e}")
+            return False
+    
+    async def get_ttl(self, key: str) -> int:
+        """
+        Get remaining TTL for a key.
+        
+        Args:
+            key: Cache key
+            
+        Returns:
+            TTL in seconds, -1 if no TTL, -2 if key doesn't exist
+        """
+        if not self.client:
+            return -2
+        
+        full_key = self._make_key(key)
+        try:
+            return self.client.ttl(full_key)
+        except Exception as e:
+            self._logger.warning(f"Cache TTL failed: {e}")
+            return -2
+    
+    def is_available(self) -> bool:
+        """
+        Check if Redis is available.
+        
+        Caches the result to avoid repeated connection attempts.
+        """
+        if self._available is not None:
+            return self._available
+        
+        try:
+            if self.client:
+                self.client.ping()
+                self._available = True
+            else:
+                self._available = False
+        except Exception:
+            self._available = False
+        
+        return self._available
+    
+    async def get_with_metadata(self, key: str) -> Optional[dict]:
+        """
+        Get value with cache metadata (TTL, hit info).
+        
+        Returns:
+            Dict with 'data', 'ttl', 'cached_at' if found, None otherwise
+        """
+        if not self.client:
+            return None
+        
+        full_key = self._make_key(key)
+        try:
+            pipe = self.client.pipeline()
+            pipe.get(full_key)
+            pipe.ttl(full_key)
+            results = pipe.execute()
+            
+            value, ttl = results
+            if value:
+                data = json.loads(value)
+                return {
+                    "data": data,
+                    "ttl_remaining": ttl,
+                    "cache_hit": True,
+                }
+            return None
+        except Exception as e:
+            self._logger.warning(f"Cache GET_WITH_METADATA failed: {e}")
+            return None
 
 
 _redis_service: Optional[RedisService] = None

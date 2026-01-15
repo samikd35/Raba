@@ -366,7 +366,6 @@ class IntentToolSelectorAgent:
                 prompt=prompt,
                 response_model=IntentExtractionResponse,
                 system_instruction=INTENT_EXTRACTION_SYSTEM_PROMPT,
-                thinking_level="low",
             )
             
             return IntentMetadata(
@@ -538,7 +537,6 @@ class IntentToolSelectorAgent:
                 prompt=prompt,
                 response_model=ToolRelevanceResponse,
                 system_instruction=TOOL_RELEVANCE_SYSTEM_PROMPT,
-                thinking_level="minimal",
             )
             
             return response.relevance_score

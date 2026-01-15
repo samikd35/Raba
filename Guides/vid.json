@@ -1,0 +1,46 @@
+{
+  "cache_hit": false,
+  "cached_at": null,
+  "generated_at": "2026-01-15T14:34:55.267822",
+  "is_fictional": false,
+  "strategy_used": "factual",
+  "total_sources": 0,
+  "interaction_id": "grounded_cfbcad7ea01dfdf4",
+  "research_images": [
+    {
+      "url": "https://miro.medium.com/1*JZbdcnSBVQz7wjGJwJqTqA.jpeg",
+      "title": "10 things you should know about black holes | by Sabine ...",
+      "source_url": "https://medium.com/starts-with-a-bang/10-things-you-should-know-about-black-holes-7ab9b3a16495",
+      "storage_url": "https://ktdlycanpkauvegadgxz.supabase.co/storage/v1/object/public/media/research_images/281455bb-ebce-4130-b1e6-5f30ca7587e7/16028e868dd7_5cf8157d.jpg",
+      "storage_path": "research_images/281455bb-ebce-4130-b1e6-5f30ca7587e7/"
+    },
+    {
+      "url": "https://media.physicsfeed.com/u/black-hole-curvature.png",
+      "title": "Black Holes: How they work? - Physics Feed",
+      "source_url": "https://physicsfeed.com/post/black-holes-how-they-work/",
+      "storage_url": "https://ktdlycanpkauvegadgxz.supabase.co/storage/v1/object/public/media/research_images/281455bb-ebce-4130-b1e6-5f30ca7587e7/e384615f46fb_ba8afc16.jpg",
+      "storage_path": "research_images/281455bb-ebce-4130-b1e6-5f30ca7587e7/"
+    },
+    {
+      "url": "https://cosmosatyourdoorstep.com/wp-content/uploads/2024/03/concept-black-hole-animation.gif",
+      "title": "How Supermassive Black Holes Work – Cosmos at Your Doorstep",
+      "source_url": "https://cosmosatyourdoorstep.com/2024/03/27/how-supermassive-black-holes-work/",
+      "storage_url": "https://ktdlycanpkauvegadgxz.supabase.co/storage/v1/object/public/media/research_images/281455bb-ebce-4130-b1e6-5f30ca7587e7/22cd7735d10a_c96ff8f8.jpg",
+      "storage_path": "research_images/281455bb-ebce-4130-b1e6-5f30ca7587e7/"
+    }
+  ],
+  "visual_elements": [],
+  "executive_summary": "Here is the research report on \"How black holes work,\" tailored for a 15-second \"Surreal Realism\" video.\n\n# RESEARCH REPORT: HOW BLACK HOLES WORK\n\n## 1. EXECUTIVE SUMMARY\n*   **The Ultimate Cosmic Trap:** Black holes are regions where gravity is so intense that nothing, not even light, can escape. They are essentially \"bottomless wells\" in the fabric of spacetime.\n*   **Viral Appeal:** They bend reality itself—warping time, stretching matter into spaghetti, and curving light so severely that you",
+  "research_findings": [
+    {
+      "citations": [],
+      "key_facts": [
+        "Here is the research report on \"How black holes work,\" tailored for a 15-second \"Surreal Realism\" video.\n\n# RESEARCH REPORT: HOW BLACK HOLES WORK\n\n## 1. EXECUTIVE SUMMARY\n*   **The Ultimate Cosmic Trap:** Black holes are regions where gravity is so intense that nothing, not even light, can escape. They are essentially \"bottomless wells\" in the fabric of spacetime.\n*   **Viral Appeal:** They bend reality itself—warping time, stretching matter into spaghetti, and curving light so severely that you can theoretically see the back of your own head. This blend of extreme danger and visual impossibility makes them perfect for surreal content.\n\n## 2. KEY FACTS\n*   **Event Horizon:** The \"point of no return.\" Once you cross this invisible boundary, the escape velocity exceeds the speed of light. To an outside observer, objects appear to freeze and fade here, never truly crossing [NASA].\n*   **Singularity:** The center of the black hole where matter is crushed to infinite density and zero volume"
+      ],
+      "confidence": 0.5,
+      "topic_segment": "Raw Research"
+    }
+  ],
+  "interesting_angles": [],
+  "research_depth_used": "standard"
+}

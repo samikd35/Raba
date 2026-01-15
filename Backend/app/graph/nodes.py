@@ -6,7 +6,18 @@ Node functions for each agent in the video generation workflow.
 from app.agents.intent_tool_selector import IntentToolSelectorAgent
 from app.graph.state import VideoGenerationState
 from app.utils.helpers import utc_now_iso
-from app.utils.logging import get_logger
+from app.utils.logging import (
+    get_logger,
+    log_header,
+    log_subheader,
+    log_key_value,
+    log_success,
+    log_error_msg,
+    log_agent_event,
+    log_workflow_event,
+    log_operation,
+    Colors,
+)
 
 logger = get_logger(__name__)
 
@@ -37,15 +48,12 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
     Returns:
         State update dict with intent/tool selection results
     """
-    logger.info("=" * 60)
-    logger.info("NODE: Intent/Tool Selector - Starting")
-    logger.info("=" * 60)
-    
     workflow_id = state.get("workflow_id", "unknown")
     topic = state.get("topic", "")
     
-    logger.info(f"Workflow ID: {workflow_id}")
-    logger.info(f"Topic: {topic[:50]}...")
+    log_header(logger, f"AGENT: Intent/Tool Selector")
+    log_agent_event(logger, "IntentToolSelector", "Starting", workflow_id)
+    log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
     
     try:
         agent = IntentToolSelectorAgent()
@@ -59,9 +67,9 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
             user_has_reference_image=bool(state.get("user_reference_image_url")),
         )
         
-        logger.info(f"Intent extracted: {result.intent_metadata.intent_type.value}")
-        logger.info(f"Tool selected: {result.selected_tool.tool_name}")
-        logger.info(f"Confidence: {result.confidence:.2f}")
+        log_success(logger, f"Intent extracted: {result.intent_metadata.intent_type.value}")
+        log_key_value(logger, "Tool selected", result.selected_tool.tool_name)
+        log_key_value(logger, "Confidence", f"{result.confidence:.2f}")
         
         state_update = {
             "intent_metadata": result.intent_metadata.model_dump(),
@@ -73,13 +81,12 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
             },
         }
         
-        logger.info("NODE: Intent/Tool Selector - Complete")
-        logger.info("=" * 60)
+        log_agent_event(logger, "IntentToolSelector", "Completed", workflow_id)
         
         return state_update
         
     except Exception as e:
-        logger.error(f"Intent/Tool Selection failed: {e}")
+        log_error_msg(logger, f"Intent/Tool Selection failed: {e}")
         
         return {
             "error": f"Intent/Tool Selection failed: {str(e)}",
@@ -115,15 +122,12 @@ async def deep_research_node(state: VideoGenerationState) -> dict:
         
     Reference: PHASE2_3_DEEP_RESEARCH_PLAN.md
     """
-    logger.info("=" * 60)
-    logger.info("NODE: Deep Research - Starting")
-    logger.info("=" * 60)
-    
     workflow_id = state.get("workflow_id", "unknown")
     topic = state.get("topic", "")
     
-    logger.info(f"Workflow ID: {workflow_id}")
-    logger.info(f"Topic: {topic[:50]}...")
+    log_header(logger, f"AGENT: Deep Research")
+    log_agent_event(logger, "DeepResearch", "Starting", workflow_id)
+    log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
     
     try:
         from app.agents.deep_research import get_deep_research_agent
@@ -134,9 +138,31 @@ async def deep_research_node(state: VideoGenerationState) -> dict:
         research_images = updated_state.get("research_images", [])
         strategy = research_data.get("strategy_used", "unknown")
         
-        logger.info(f"Strategy used: {strategy}")
-        logger.info(f"Images found: {len(research_images)}")
-        logger.info(f"Is fictional: {research_data.get('is_fictional', False)}")
+        log_success(logger, f"Research completed with strategy: {strategy}")
+        log_key_value(logger, "Images found", len(research_images))
+        log_key_value(logger, "Is fictional", research_data.get('is_fictional', False))
+        
+        # Detailed logging of research output quality
+        findings = research_data.get("research_findings", [])
+        visual_elements = research_data.get("visual_elements", [])
+        interesting_angles = research_data.get("interesting_angles", [])
+        exec_summary = research_data.get("executive_summary", "")
+        
+        logger.info(f"[RESEARCH OUTPUT] Executive summary length: {len(exec_summary)} chars")
+        logger.info(f"[RESEARCH OUTPUT] Research findings count: {len(findings)}")
+        for i, finding in enumerate(findings[:3], 1):
+            if isinstance(finding, dict):
+                segment = finding.get("topic_segment", "Unknown")
+                facts_count = len(finding.get("key_facts", []))
+                confidence = finding.get("confidence", 0)
+                logger.info(f"[RESEARCH OUTPUT] Finding {i}: {segment} ({facts_count} facts, conf: {confidence})")
+        logger.info(f"[RESEARCH OUTPUT] Visual elements count: {len(visual_elements)}")
+        if visual_elements:
+            logger.info(f"[RESEARCH OUTPUT] Visual elements: {visual_elements[:2]}...")
+        logger.info(f"[RESEARCH OUTPUT] Interesting angles count: {len(interesting_angles)}")
+        if interesting_angles:
+            logger.info(f"[RESEARCH OUTPUT] Angles: {interesting_angles[:2]}...")
+        logger.info(f"[RESEARCH OUTPUT] Research images: {len(research_images)}")
         
         state_update = {
             "research_data": research_data,
@@ -147,13 +173,12 @@ async def deep_research_node(state: VideoGenerationState) -> dict:
             },
         }
         
-        logger.info("NODE: Deep Research - Complete")
-        logger.info("=" * 60)
+        log_agent_event(logger, "DeepResearch", "Completed", workflow_id)
         
         return state_update
         
     except Exception as e:
-        logger.error(f"Deep Research failed: {e}")
+        log_error_msg(logger, f"Deep Research failed: {e}")
         
         return {
             "error": f"Deep Research failed: {str(e)}",
@@ -192,17 +217,20 @@ async def script_writer_node(state: VideoGenerationState) -> dict:
         
     Reference: PHASE2_4_SCRIPT_GENERATOR_PLAN.md
     """
-    logger.info("=" * 60)
-    logger.info("NODE: Script Writer - Starting")
-    logger.info("=" * 60)
-    
     workflow_id = state.get("workflow_id", "unknown")
     topic = state.get("topic", "")
     duration = state.get("duration_seconds", 18)
+    research_data = state.get("research_data", {})
     
-    logger.info(f"Workflow ID: {workflow_id}")
-    logger.info(f"Topic: {topic[:50]}...")
-    logger.info(f"Duration: {duration}s")
+    log_header(logger, f"AGENT: Script Writer")
+    log_agent_event(logger, "ScriptWriter", "Starting", workflow_id)
+    log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
+    log_key_value(logger, "Target duration", f"{duration}s")
+    
+    # Log input data for debugging
+    logger.info(f"[SCRIPT INPUT] Research data keys: {list(research_data.keys()) if research_data else 'None'}")
+    findings_count = len(research_data.get("research_findings", []))
+    logger.info(f"[SCRIPT INPUT] Research findings count: {findings_count}")
     
     try:
         from app.agents.script_writer import get_script_writer_agent
@@ -212,17 +240,54 @@ async def script_writer_node(state: VideoGenerationState) -> dict:
         
         script_output = result.get("script_output", {})
         viral_score = result.get("viral_score", 0.0)
-        scenes_count = len(result.get("scenes", []))
+        scenes = result.get("scenes", [])
+        scenes_count = len(scenes)
+        hook = result.get("hook", {})
+        cta = result.get("call_to_action", {})
         
-        logger.info(f"Script generated successfully")
-        logger.info(f"Viral score: {viral_score:.2f}")
-        logger.info(f"Scenes: {scenes_count}")
+        log_success(logger, "Script generated successfully")
+        log_key_value(logger, "Viral score", f"{viral_score:.2f}")
+        log_key_value(logger, "Scenes", scenes_count)
+        
+        # Detailed script logging
+        logger.info(f"[SCRIPT OUTPUT] Hook: {hook.get('script', 'N/A')[:100]}")
+        for i, scene in enumerate(scenes[:3], 1):  # Log first 3 scenes
+            logger.info(f"[SCRIPT OUTPUT] Scene {i}: {scene.get('description', 'N/A')[:80]}...")
+        logger.info(f"[SCRIPT OUTPUT] CTA: {cta.get('script', 'N/A')[:80]}")
+        logger.info(f"[SCRIPT OUTPUT] Script saved to state: {bool(script_output)}")
+        
+        # Persist script_output to database
+        try:
+            from app.services.supabase import get_supabase_service
+            import json
+            from datetime import datetime
+            
+            # Helper to serialize datetime objects
+            def json_serializer(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+            
+            # Convert to JSON-safe dict by serializing and deserializing
+            script_output_safe = json.loads(json.dumps(script_output, default=json_serializer))
+            
+            supabase = get_supabase_service()
+            await supabase.update_workflow(
+                workflow_id=workflow_id,
+                updates={
+                    "script_output": script_output_safe,
+                    "status": "script_complete",
+                },
+            )
+            logger.info(f"[SCRIPT OUTPUT] Persisted to database: {workflow_id}")
+        except Exception as db_error:
+            logger.error(f"[SCRIPT OUTPUT] Database persistence failed: {db_error}")
         
         state_update = {
             "script_output": script_output,
-            "hook": result.get("hook"),
-            "scenes": result.get("scenes"),
-            "call_to_action": result.get("call_to_action"),
+            "hook": hook,
+            "scenes": scenes,
+            "call_to_action": cta,
             "viral_score": viral_score,
             "phase_timestamps": {
                 **state.get("phase_timestamps", {}),
@@ -230,13 +295,12 @@ async def script_writer_node(state: VideoGenerationState) -> dict:
             },
         }
         
-        logger.info("NODE: Script Writer - Complete")
-        logger.info("=" * 60)
+        log_agent_event(logger, "ScriptWriter", "Completed", workflow_id)
         
         return state_update
         
     except Exception as e:
-        logger.error(f"Script Writer failed: {e}")
+        log_error_msg(logger, f"Script Writer failed: {e}")
         
         return {
             "error": f"Script Writer failed: {str(e)}",
@@ -256,46 +320,283 @@ async def image_generator_node(state: VideoGenerationState) -> dict:
     """
     LangGraph node for Image Generator.
     
-    Placeholder - to be implemented in Phase 3.1.
+    Generates 1-5 reference images using Nano Banana Pro/Flash based on
+    script scenes. Maintains visual consistency across all images.
+    
+    Input from state:
+        - workflow_id: For storage path
+        - script_output: Contains scenes[]
+        - selected_tool: Tool metadata with style specs
+        - user_reference_image_url: Optional user reference
+        - research_images: Images from Deep Research
+        - aspect_ratio, resolution: Video specs
+        
+    Output to state:
+        - generated_images: List of generated image URLs
+        - all_images: Combined list of all image URLs
+        - image_metadata: Metadata for each image
+        
+    Reference: PHASE3_1_IMAGE_GENERATOR_PLAN.md
     """
-    logger.info("NODE: Image Generator - PLACEHOLDER")
-    return {
-        "phase_timestamps": {
-            **state.get("phase_timestamps", {}),
-            "image_generator_placeholder": utc_now_iso(),
-        },
-    }
+    workflow_id = state.get("workflow_id", "unknown")
+    topic = state.get("topic", "")
+    
+    log_header(logger, f"AGENT: Image Generator")
+    log_agent_event(logger, "ImageGenerator", "Starting", workflow_id)
+    log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
+    
+    try:
+        from app.agents.image_generator import ImageGeneratorAgent
+        
+        agent = ImageGeneratorAgent()
+        result = await agent.run(state)
+        
+        if result.get("error"):
+            logger.error(f"Image generation error: {result.get('error')}")
+            return result
+        
+        generated_count = len(result.get("generated_images", []))
+        all_count = len(result.get("all_images", []))
+        
+        log_success(logger, f"Generated {generated_count} images")
+        log_key_value(logger, "Total images (incl. external)", all_count)
+        
+        state_update = {
+            "generated_images": result.get("generated_images", []),
+            "all_images": result.get("all_images", []),
+            "image_metadata": result.get("image_metadata", []),
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "image_generator_completed": utc_now_iso(),
+            },
+        }
+        
+        log_agent_event(logger, "ImageGenerator", "Completed", workflow_id)
+        
+        return state_update
+        
+    except Exception as e:
+        log_error_msg(logger, f"Image Generator failed: {e}")
+        
+        return {
+            "error": f"Image Generator failed: {str(e)}",
+            "error_details": {
+                "node": "image_generator",
+                "exception": str(e),
+                "timestamp": utc_now_iso(),
+            },
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "image_generator_failed": utc_now_iso(),
+            },
+        }
 
 
 async def video_generator_node(state: VideoGenerationState) -> dict:
     """
     LangGraph node for Video Generator.
     
-    Placeholder - to be implemented in Phase 3.2.
+    Generates final YouTube Shorts (8-25 seconds) using Veo 3.1 with native
+    audio from script, reference images, and workflow state.
+    
+    Input from state:
+        - workflow_id: For storage path
+        - script_output: Contains hook, scenes, CTA
+        - generated_images: From Image Generator (max 3)
+        - user_reference_image_url: Optional user reference
+        - research_images: Images from Deep Research
+        - selected_tool: Tool metadata with style specs
+        - duration_seconds: Target video duration (8-25s)
+        - aspect_ratio, resolution: Video specs
+        - enable_audio: Whether to generate native audio
+        
+    Output to state:
+        - video_output: Complete video metadata
+        - final_video_url: Public URL of final video
+        - video_metadata: Duration, segments, quality info
+        
+    Reference: PHASE3_2_VIDEO_GENERATOR_PLAN.md
     """
-    logger.info("NODE: Video Generator - PLACEHOLDER")
-    return {
-        "phase_timestamps": {
-            **state.get("phase_timestamps", {}),
-            "video_generator_placeholder": utc_now_iso(),
-        },
-    }
+    workflow_id = state.get("workflow_id", "unknown")
+    topic = state.get("topic", "")
+    duration = state.get("duration_seconds", 18)
+    
+    log_header(logger, f"AGENT: Video Generator")
+    log_agent_event(logger, "VideoGenerator", "Starting", workflow_id)
+    log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
+    log_key_value(logger, "Target duration", f"{duration}s")
+    
+    # Detailed logging of inputs passed to Video Generator
+    script_output = state.get("script_output", {})
+    generated_images = state.get("generated_images", [])
+    research_images = state.get("research_images", [])
+    scenes = state.get("scenes", [])
+    hook = state.get("hook", {})
+    
+    logger.info(f"[VIDEO INPUT] Script output present: {bool(script_output)}")
+    logger.info(f"[VIDEO INPUT] Hook: {hook.get('script', 'N/A')[:60] if hook else 'None'}")
+    logger.info(f"[VIDEO INPUT] Scenes count: {len(scenes)}")
+    for i, scene in enumerate(scenes[:3], 1):
+        logger.info(f"[VIDEO INPUT] Scene {i} description: {scene.get('description', 'N/A')[:60]}...")
+    logger.info(f"[VIDEO INPUT] Generated images (Nano Banana): {len(generated_images) if generated_images else 0}")
+    if generated_images:
+        for i, img_url in enumerate(generated_images[:3], 1):
+            logger.info(f"[VIDEO INPUT] Gen Image {i}: {img_url[:80]}...")
+    logger.info(f"[VIDEO INPUT] Research images (reference only): {len(research_images) if research_images else 0}")
+    
+    try:
+        from app.agents.video_generator import VideoGeneratorAgent
+        
+        agent = VideoGeneratorAgent()
+        result = await agent.run(state)
+        
+        if result.get("error"):
+            logger.error(f"Video generation error: {result.get('error')}")
+            return result
+        
+        video_url = result.get("final_video_url", "")
+        video_metadata = result.get("video_metadata", {})
+        segments = video_metadata.get("segments", 1)
+        
+        log_success(logger, f"Video generated successfully")
+        log_key_value(logger, "Video URL", video_url[:60] + "..." if len(video_url) > 60 else video_url)
+        log_key_value(logger, "Segments", segments)
+        
+        state_update = {
+            "video_output": result.get("video_output"),
+            "final_video_url": video_url,
+            "video_metadata": video_metadata,
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "video_generator_completed": utc_now_iso(),
+            },
+        }
+        
+        log_agent_event(logger, "VideoGenerator", "Completed", workflow_id)
+        
+        return state_update
+        
+    except Exception as e:
+        log_error_msg(logger, f"Video Generator failed: {e}")
+        
+        return {
+            "error": f"Video Generator failed: {str(e)}",
+            "error_details": {
+                "node": "video_generator",
+                "exception": str(e),
+                "timestamp": utc_now_iso(),
+            },
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "video_generator_failed": utc_now_iso(),
+            },
+        }
 
 
 async def output_processor_node(state: VideoGenerationState) -> dict:
     """
     LangGraph node for Output Processing.
     
-    Placeholder - to be implemented in Phase 3.3.
+    Finalizes the workflow after video generation completes.
+    NOT a separate agent - a post-processing workflow step.
+    
+    Input from state:
+        - workflow_id
+        - video_output (from Video Generator)
+        - final_video_url
+        - generated_images, all_images
+        - script_output, research_data
+        - selected_tool
+        - phase_timestamps, started_at
+        
+    Output to state:
+        - status: "completed" or "failed"
+        - completed_at: timestamp
+        - generation_time_seconds: total time
+        - final_output: complete response object
+        
+    Reference: RABA_Architecture.md Section 2.8, PHASE3_3_OUTPUT_PROCESSOR_PLAN.md
     """
-    logger.info("NODE: Output Processor - PLACEHOLDER")
-    return {
-        "phase_timestamps": {
-            **state.get("phase_timestamps", {}),
-            "output_processor_placeholder": utc_now_iso(),
-        },
-        "completed_at": utc_now_iso(),
-    }
+    workflow_id = state.get("workflow_id", "unknown")
+    
+    log_header(logger, f"OUTPUT PROCESSOR")
+    log_workflow_event(logger, workflow_id, "Finalizing workflow")
+    
+    try:
+        from app.services.workflow_service import get_workflow_service
+        
+        service = get_workflow_service()
+        
+        is_valid, error_msg = service.validate_completion_ready(state)
+        
+        if not is_valid:
+            logger.error(f"Workflow not ready for completion: {error_msg}")
+            
+            error_output = service.build_error_output(state)
+            
+            await service.update_workflow_failed(
+                workflow_id=workflow_id,
+                error=error_msg,
+                error_details={"phase": "output_processor", "validation_failed": True},
+            )
+            
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "final_output": error_output.to_api_response(),
+                "completed_at": utc_now_iso(),
+                "phase_timestamps": {
+                    **state.get("phase_timestamps", {}),
+                    "output_processor_failed": utc_now_iso(),
+                },
+            }
+        
+        completion_output = service.build_completion_output(state)
+        
+        await service.update_workflow_completed(
+            workflow_id=workflow_id,
+            output=completion_output,
+        )
+        
+        final_response = completion_output.to_api_response()
+        
+        log_success(logger, "Workflow completed successfully!")
+        log_key_value(logger, "Total generation time", completion_output.timing.formatted_total)
+        log_key_value(logger, "Video URL", completion_output.video.url[:60] + "..." if len(completion_output.video.url) > 60 else completion_output.video.url)
+        log_key_value(logger, "Images", completion_output.images.total_count)
+        
+        state_update = {
+            "status": "completed",
+            "completed_at": utc_now_iso(),
+            "generation_time_seconds": completion_output.timing.total_seconds,
+            "final_output": final_response,
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "output_processor_completed": utc_now_iso(),
+            },
+        }
+        
+        log_workflow_event(logger, workflow_id, "Output processing completed")
+        
+        return state_update
+        
+    except Exception as e:
+        log_error_msg(logger, f"Output Processor failed: {e}")
+        
+        return {
+            "status": "failed",
+            "error": f"Output processing failed: {str(e)}",
+            "error_details": {
+                "node": "output_processor",
+                "exception": str(e),
+                "timestamp": utc_now_iso(),
+            },
+            "completed_at": utc_now_iso(),
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "output_processor_failed": utc_now_iso(),
+            },
+        }
 
 
 async def error_handler_node(state: VideoGenerationState) -> dict:
@@ -317,40 +618,142 @@ async def error_handler_node(state: VideoGenerationState) -> dict:
 
 
 async def hitl_tool_gate_node(state: VideoGenerationState) -> dict:
-    """HITL gate after tool selection - pauses for user approval."""
-    logger.info("NODE: HITL Tool Gate - Awaiting approval")
+    """HITL gate after tool selection - pauses for user approval.
+    
+    Stores tool selection output and updates workflow status to awaiting approval.
+    Reference: SRS.md FR-702, FR-706, FR-707
+    """
+    from app.models.hitl import HITLGate
+    from app.services.hitl_service import get_hitl_service
+    
+    logger.info("NODE: HITL Tool Gate - Pausing for approval")
+    
+    workflow_id = state.get("workflow_id")
+    gate = HITLGate.TOOL_SELECTION
+    
+    # Collect output for user review
+    current_output = {
+        "selected_tool": state.get("selected_tool"),
+        "intent_metadata": state.get("intent_metadata"),
+        "tool_execution_params": state.get("tool_execution_params"),
+    }
+    
+    # Pause workflow via service
+    service = get_hitl_service()
+    await service.pause_at_gate(workflow_id, gate, current_output)
+    
     return {
-        "current_hitl_gate": "tool_selection",
+        "current_hitl_gate": gate.value,
+        "hitl_gate_outputs": {gate.value: current_output},
     }
 
 
 async def hitl_research_gate_node(state: VideoGenerationState) -> dict:
-    """HITL gate after research - pauses for user approval."""
-    logger.info("NODE: HITL Research Gate - Awaiting approval")
+    """HITL gate after research - pauses for user approval.
+    
+    Stores research output and updates workflow status to awaiting approval.
+    Reference: SRS.md FR-702, FR-706, FR-707
+    """
+    from app.models.hitl import HITLGate
+    from app.services.hitl_service import get_hitl_service
+    
+    logger.info("NODE: HITL Research Gate - Pausing for approval")
+    
+    workflow_id = state.get("workflow_id")
+    gate = HITLGate.RESEARCH
+    
+    current_output = {
+        "research_output": state.get("research_output"),
+        "research_images": state.get("research_images"),
+    }
+    
+    service = get_hitl_service()
+    await service.pause_at_gate(workflow_id, gate, current_output)
+    
     return {
-        "current_hitl_gate": "research",
+        "current_hitl_gate": gate.value,
+        "hitl_gate_outputs": {gate.value: current_output},
     }
 
 
 async def hitl_script_gate_node(state: VideoGenerationState) -> dict:
-    """HITL gate after script - pauses for user approval."""
-    logger.info("NODE: HITL Script Gate - Awaiting approval")
+    """HITL gate after script - pauses for user approval.
+    
+    Stores script output and updates workflow status to awaiting approval.
+    Reference: SRS.md FR-702, FR-706, FR-707
+    """
+    from app.models.hitl import HITLGate
+    from app.services.hitl_service import get_hitl_service
+    
+    logger.info("NODE: HITL Script Gate - Pausing for approval")
+    
+    workflow_id = state.get("workflow_id")
+    gate = HITLGate.SCRIPT
+    
+    current_output = {
+        "script_output": state.get("script_output"),
+    }
+    
+    service = get_hitl_service()
+    await service.pause_at_gate(workflow_id, gate, current_output)
+    
     return {
-        "current_hitl_gate": "script",
+        "current_hitl_gate": gate.value,
+        "hitl_gate_outputs": {gate.value: current_output},
     }
 
 
 async def hitl_image_gate_node(state: VideoGenerationState) -> dict:
-    """HITL gate after images - pauses for user approval."""
-    logger.info("NODE: HITL Image Gate - Awaiting approval")
+    """HITL gate after images - pauses for user approval.
+    
+    Stores generated images and updates workflow status to awaiting approval.
+    Reference: SRS.md FR-702, FR-706, FR-707
+    """
+    from app.models.hitl import HITLGate
+    from app.services.hitl_service import get_hitl_service
+    
+    logger.info("NODE: HITL Image Gate - Pausing for approval")
+    
+    workflow_id = state.get("workflow_id")
+    gate = HITLGate.IMAGES
+    
+    current_output = {
+        "generated_images": state.get("generated_images"),
+        "image_metadata": state.get("image_metadata"),
+    }
+    
+    service = get_hitl_service()
+    await service.pause_at_gate(workflow_id, gate, current_output)
+    
     return {
-        "current_hitl_gate": "images",
+        "current_hitl_gate": gate.value,
+        "hitl_gate_outputs": {gate.value: current_output},
     }
 
 
 async def hitl_video_gate_node(state: VideoGenerationState) -> dict:
-    """HITL gate after video - pauses for user approval."""
-    logger.info("NODE: HITL Video Gate - Awaiting approval")
+    """HITL gate after video - pauses for user approval.
+    
+    Stores video output and updates workflow status to awaiting approval.
+    Reference: SRS.md FR-702, FR-706, FR-707
+    """
+    from app.models.hitl import HITLGate
+    from app.services.hitl_service import get_hitl_service
+    
+    logger.info("NODE: HITL Video Gate - Pausing for approval")
+    
+    workflow_id = state.get("workflow_id")
+    gate = HITLGate.VIDEO
+    
+    current_output = {
+        "video_output": state.get("video_output"),
+        "final_video_url": state.get("final_video_url"),
+    }
+    
+    service = get_hitl_service()
+    await service.pause_at_gate(workflow_id, gate, current_output)
+    
     return {
-        "current_hitl_gate": "video",
+        "current_hitl_gate": gate.value,
+        "hitl_gate_outputs": {gate.value: current_output},
     }

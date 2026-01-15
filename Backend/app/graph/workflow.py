@@ -129,6 +129,60 @@ def route_after_video(
     return NODE_OUTPUT_PROCESSOR
 
 
+def route_after_hitl_tool_gate(
+    state: VideoGenerationState,
+) -> Literal["intent_tool_selector", "deep_research"]:
+    """Route after HITL Tool Gate - support regeneration.
+    
+    If pending_regeneration is set for this gate, route back to agent.
+    Otherwise continue to next step.
+    """
+    if state.get("pending_regeneration") == "tool_selection":
+        logger.info("Regeneration requested - routing back to Intent/Tool Selector")
+        return NODE_INTENT_TOOL_SELECTOR
+    return NODE_DEEP_RESEARCH
+
+
+def route_after_hitl_research_gate(
+    state: VideoGenerationState,
+) -> Literal["deep_research", "script_writer"]:
+    """Route after HITL Research Gate - support regeneration."""
+    if state.get("pending_regeneration") == "research":
+        logger.info("Regeneration requested - routing back to Deep Research")
+        return NODE_DEEP_RESEARCH
+    return NODE_SCRIPT_WRITER
+
+
+def route_after_hitl_script_gate(
+    state: VideoGenerationState,
+) -> Literal["script_writer", "image_generator"]:
+    """Route after HITL Script Gate - support regeneration."""
+    if state.get("pending_regeneration") == "script":
+        logger.info("Regeneration requested - routing back to Script Writer")
+        return NODE_SCRIPT_WRITER
+    return NODE_IMAGE_GENERATOR
+
+
+def route_after_hitl_image_gate(
+    state: VideoGenerationState,
+) -> Literal["image_generator", "video_generator"]:
+    """Route after HITL Image Gate - support regeneration."""
+    if state.get("pending_regeneration") == "images":
+        logger.info("Regeneration requested - routing back to Image Generator")
+        return NODE_IMAGE_GENERATOR
+    return NODE_VIDEO_GENERATOR
+
+
+def route_after_hitl_video_gate(
+    state: VideoGenerationState,
+) -> Literal["video_generator", "output_processor"]:
+    """Route after HITL Video Gate - support regeneration."""
+    if state.get("pending_regeneration") == "video":
+        logger.info("Regeneration requested - routing back to Video Generator")
+        return NODE_VIDEO_GENERATOR
+    return NODE_OUTPUT_PROCESSOR
+
+
 def create_workflow_graph() -> StateGraph:
     """
     Create the video generation workflow graph.
@@ -179,19 +233,20 @@ def create_workflow_graph() -> StateGraph:
         route_after_intent_tool_selection,
     )
     
-    workflow.add_edge(NODE_HITL_TOOL_GATE, NODE_DEEP_RESEARCH)
+    # HITL gates now use conditional edges to support regeneration
+    workflow.add_conditional_edges(NODE_HITL_TOOL_GATE, route_after_hitl_tool_gate)
     workflow.add_conditional_edges(NODE_DEEP_RESEARCH, route_after_research)
     
-    workflow.add_edge(NODE_HITL_RESEARCH_GATE, NODE_SCRIPT_WRITER)
+    workflow.add_conditional_edges(NODE_HITL_RESEARCH_GATE, route_after_hitl_research_gate)
     workflow.add_conditional_edges(NODE_SCRIPT_WRITER, route_after_script)
     
-    workflow.add_edge(NODE_HITL_SCRIPT_GATE, NODE_IMAGE_GENERATOR)
+    workflow.add_conditional_edges(NODE_HITL_SCRIPT_GATE, route_after_hitl_script_gate)
     workflow.add_conditional_edges(NODE_IMAGE_GENERATOR, route_after_images)
     
-    workflow.add_edge(NODE_HITL_IMAGE_GATE, NODE_VIDEO_GENERATOR)
+    workflow.add_conditional_edges(NODE_HITL_IMAGE_GATE, route_after_hitl_image_gate)
     workflow.add_conditional_edges(NODE_VIDEO_GENERATOR, route_after_video)
     
-    workflow.add_edge(NODE_HITL_VIDEO_GATE, NODE_OUTPUT_PROCESSOR)
+    workflow.add_conditional_edges(NODE_HITL_VIDEO_GATE, route_after_hitl_video_gate)
     workflow.add_edge(NODE_OUTPUT_PROCESSOR, END)
     
     workflow.add_edge(NODE_ERROR_HANDLER, END)

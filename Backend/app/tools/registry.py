@@ -2,6 +2,9 @@
 
 Centralized registry for managing video generation tools.
 Handles CRUD operations with Supabase and Redis caching.
+
+Reference: RABA_Architecture.md Section 4 - Tool Repository System
+Phase 4.3 Implementation - Tool List Caching
 """
 
 import json
@@ -15,13 +18,12 @@ from app.models.tool import (
     ToolResponse,
     ToolUpdate,
 )
-from app.services.redis import CacheService, get_cache_service
+from app.services.redis import RedisService, get_redis_service
 from app.services.supabase import get_supabase_client
+from app.utils.cache import CacheKeys
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
 class ToolNotFoundError(Exception):
@@ -39,7 +41,9 @@ class ToolRegistry:
     Centralized tool registry with caching.
     
     Manages all CRUD operations for video generation tools,
-    with Redis caching for performance.
+    with Redis caching for performance (1-hour TTL).
+    
+    Reference: RABA_Architecture.md Section 4 - Tool Repository System
     """
     
     TABLE_NAME = "tools"
@@ -47,17 +51,17 @@ class ToolRegistry:
     def __init__(
         self,
         supabase_client=None,
-        cache_service: Optional[CacheService] = None,
+        redis_service: Optional[RedisService] = None,
     ):
         """
         Initialize tool registry.
         
         Args:
             supabase_client: Optional Supabase client
-            cache_service: Optional cache service
+            redis_service: Optional Redis service for caching
         """
         self._supabase = supabase_client
-        self._cache = cache_service
+        self._redis = redis_service
         self._logger = get_logger(f"{__name__}.ToolRegistry")
     
     @property
@@ -68,60 +72,59 @@ class ToolRegistry:
         return self._supabase
     
     @property
-    def cache(self) -> Optional[CacheService]:
-        """Get cache service (lazy initialization). Returns None if Redis unavailable."""
-        if self._cache is None:
-            try:
-                self._cache = get_cache_service()
-                # Test connection
-                self._cache.client.ping()
-            except Exception as e:
-                self._logger.warning(f"Redis unavailable, caching disabled: {e}")
-                self._cache = None
-        return self._cache
+    def redis(self) -> Optional[RedisService]:
+        """Get Redis service (lazy initialization)."""
+        if self._redis is None:
+            self._redis = get_redis_service()
+        return self._redis
     
     def _cache_key(self, key_type: str, identifier: str = "") -> str:
-        """Generate cache key."""
-        if identifier:
-            return f"tools:{key_type}:{identifier}"
-        return f"tools:{key_type}"
+        """Generate cache key using standardized format."""
+        if key_type == "list":
+            return CacheKeys.tools_list()
+        elif key_type == "category":
+            return CacheKeys.tools_by_category(identifier)
+        else:
+            # Individual tool by ID
+            return f"tools:id:{identifier}"
     
-    async def _cache_get(self, key: str) -> Optional[str]:
+    async def _cache_get(self, key: str) -> Optional[dict]:
         """Get from cache, returns None if cache unavailable."""
-        if self.cache is None:
+        if not self.redis.is_available():
             return None
         try:
-            return await self.cache.get(key)
+            return await self.redis.get(key)
         except Exception as e:
             self._logger.warning(f"Cache get failed: {e}")
             return None
     
-    async def _cache_set(self, key: str, value: str, ttl: int = CACHE_TTL_SECONDS) -> None:
+    async def _cache_set(self, key: str, value: dict, ttl: Optional[int] = None) -> None:
         """Set in cache, silently fails if cache unavailable."""
-        if self.cache is None:
+        if not self.redis.is_available():
             return
         try:
-            await self.cache.set(key, value, ttl)
+            cache_ttl = ttl or CacheKeys.tools_ttl()
+            await self.redis.set(key, value, ttl=cache_ttl)
         except Exception as e:
             self._logger.warning(f"Cache set failed: {e}")
     
     async def _cache_delete(self, key: str) -> None:
         """Delete from cache, silently fails if cache unavailable."""
-        if self.cache is None:
+        if not self.redis.is_available():
             return
         try:
-            await self.cache.delete(key)
+            await self.redis.delete(key)
         except Exception as e:
             self._logger.warning(f"Cache delete failed: {e}")
     
     async def _invalidate_cache(self) -> None:
         """Invalidate all tool caches."""
-        if self.cache is None:
+        if not self.redis.is_available():
             return
         self._logger.info("Invalidating tool caches")
-        await self._cache_delete(self._cache_key("list"))
+        await self._cache_delete(CacheKeys.tools_list())
         for category in ["surreal_realism", "high_octane_anime", "stylized_3d"]:
-            await self._cache_delete(self._cache_key("category", category))
+            await self._cache_delete(CacheKeys.tools_by_category(category))
     
     def _record_to_response(self, record: dict[str, Any]) -> ToolResponse:
         """Convert database record to ToolResponse."""
@@ -230,7 +233,7 @@ class ToolRegistry:
         cached = await self._cache_get(cache_key)
         if cached:
             self._logger.debug(f"Cache hit for tool: {tool_id}")
-            return ToolResponse.model_validate_json(cached)
+            return ToolResponse.model_validate(cached)
         
         # Query database
         response = (
@@ -246,7 +249,7 @@ class ToolRegistry:
         tool = self._record_to_response(response.data[0])
         
         # Cache result
-        await self._cache_set(cache_key, tool.model_dump_json())
+        await self._cache_set(cache_key, tool.model_dump())
         
         return tool
     
@@ -282,6 +285,8 @@ class ToolRegistry:
         """
         List tools with optional filters.
         
+        Includes Redis caching with 1-hour TTL for default queries.
+        
         Args:
             category: Optional category filter
             is_active: Filter by active status
@@ -299,8 +304,7 @@ class ToolRegistry:
             cached = await self._cache_get(cache_key)
             if cached:
                 self._logger.debug(f"Cache hit for tool list")
-                data = json.loads(cached)
-                return ToolListResponse(**data)
+                return ToolListResponse.model_validate(cached)
         
         # Build query
         query = self.supabase.table(self.TABLE_NAME).select("*", count="exact")
@@ -328,7 +332,7 @@ class ToolRegistry:
         
         # Cache result (only for default queries)
         if offset == 0 and limit == 50:
-            await self._cache_set(cache_key, result.model_dump_json())
+            await self._cache_set(cache_key, result.model_dump(mode="json"))
         
         return result
     

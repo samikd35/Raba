@@ -21,7 +21,19 @@ from app.models.tool import (
 from app.services.tool_enhancer import get_tool_enhancer
 from app.services.tool_executor import get_tool_executor, ParameterValidationError
 from app.tools.registry import get_tool_registry, ToolNotFoundError
-from app.utils.logging import get_logger
+from app.utils.logging import (
+    get_logger,
+    log_header,
+    log_key_value,
+    log_request_start,
+    log_request_end,
+    log_success,
+    log_error_msg,
+    log_warning_msg,
+    log_operation,
+    log_subheader,
+)
+import time
 
 logger = get_logger(__name__)
 
@@ -43,15 +55,26 @@ async def list_tools(
     
     Returns paginated list of tools sorted by priority (descending).
     """
-    logger.info(f"Listing tools: category={category}, is_active={is_active}")
+    start_time = time.time()
+    log_request_start(logger, "GET", "/api/v1/tools", {
+        "category": category or "all",
+        "is_active": is_active,
+        "limit": limit,
+        "offset": offset,
+    })
     
     registry = get_tool_registry()
-    return await registry.list_tools(
+    result = await registry.list_tools(
         category=category,
         is_active=is_active,
         limit=limit,
         offset=offset,
     )
+    
+    log_success(logger, f"Listed {len(result.tools)} tools (total: {result.total})")
+    duration_ms = (time.time() - start_time) * 1000
+    log_request_end(logger, "GET", "/api/v1/tools", 200, duration_ms)
+    return result
 
 
 @router.get("/{tool_id}", response_model=ToolResponse)
@@ -62,14 +85,21 @@ async def get_tool(tool_id: str) -> ToolResponse:
     Args:
         tool_id: Unique tool slug (e.g., "surreal_impossible_sims")
     """
-    logger.info(f"Getting tool: {tool_id}")
+    start_time = time.time()
+    log_request_start(logger, "GET", f"/api/v1/tools/{tool_id}")
     
     registry = get_tool_registry()
     tool = await registry.get_by_tool_id(tool_id)
     
     if not tool:
+        log_warning_msg(logger, f"Tool not found: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "GET", f"/api/v1/tools/{tool_id}", 404, duration_ms)
         raise HTTPException(status_code=404, detail=f"Tool not found: {tool_id}")
     
+    log_success(logger, f"Tool retrieved: {tool_id}")
+    duration_ms = (time.time() - start_time) * 1000
+    log_request_end(logger, "GET", f"/api/v1/tools/{tool_id}", 200, duration_ms)
     return tool
 
 
@@ -91,25 +121,38 @@ async def create_tool(request: ToolCreate) -> ToolResponse:
     - `idea`: Description of what the tool should do
     - `category`: Optional category hint
     """
-    logger.info(f"Creating tool: {request.tool_name}")
+    start_time = time.time()
+    log_header(logger, f"CREATE TOOL: {request.tool_name}")
+    log_request_start(logger, "POST", "/api/v1/tools", {
+        "tool_name": request.tool_name,
+        "idea_length": len(request.idea),
+        "category_hint": request.category.value if request.category else "auto",
+    })
     
     try:
-        # Enhance the idea with Gemini
-        enhancer = get_tool_enhancer()
-        enhanced = await enhancer.enhance_tool_idea(request)
+        with log_operation(logger, "Enhance tool idea with Gemini"):
+            enhancer = get_tool_enhancer()
+            enhanced = await enhancer.enhance_tool_idea(request)
         
-        # Save to database
-        registry = get_tool_registry()
-        tool = await registry.create(
-            enhanced_tool=enhanced,
-            original_idea=request.idea,
-        )
+        log_key_value(logger, "Generated tool_id", enhanced.tool_id)
+        log_key_value(logger, "Category", enhanced.category.value)
         
-        logger.info(f"Tool created: {tool.tool_id}")
+        with log_operation(logger, "Save tool to database"):
+            registry = get_tool_registry()
+            tool = await registry.create(
+                enhanced_tool=enhanced,
+                original_idea=request.idea,
+            )
+        
+        log_success(logger, f"Tool created: {tool.tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", "/api/v1/tools", 201, duration_ms)
         return tool
         
     except Exception as e:
-        logger.error(f"Failed to create tool: {e}")
+        log_error_msg(logger, f"Failed to create tool: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", "/api/v1/tools", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -121,15 +164,25 @@ async def preview_enhancement(request: ToolCreate) -> ToolEnhancementResponse:
     Use this to see what Gemini will generate before committing.
     Returns the enhanced tool configuration without persisting.
     """
-    logger.info(f"Previewing tool enhancement: {request.tool_name}")
+    start_time = time.time()
+    log_request_start(logger, "POST", "/api/v1/tools/preview", {
+        "tool_name": request.tool_name,
+    })
     
     try:
-        enhancer = get_tool_enhancer()
-        enhanced = await enhancer.enhance_tool_idea(request)
+        with log_operation(logger, "Preview tool enhancement"):
+            enhancer = get_tool_enhancer()
+            enhanced = await enhancer.enhance_tool_idea(request)
+        
+        log_success(logger, f"Preview generated: {enhanced.tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", "/api/v1/tools/preview", 200, duration_ms)
         return enhanced
         
     except Exception as e:
-        logger.error(f"Failed to preview enhancement: {e}")
+        log_error_msg(logger, f"Failed to preview enhancement: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", "/api/v1/tools/preview", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -145,7 +198,12 @@ async def update_tool(tool_id: str, request: ToolUpdate) -> ToolResponse:
         tool_id: Tool to update
         request: Fields to update
     """
-    logger.info(f"Updating tool: {tool_id}")
+    start_time = time.time()
+    log_request_start(logger, "PUT", f"/api/v1/tools/{tool_id}", {
+        "has_name_update": bool(request.tool_name),
+        "has_idea_update": bool(request.idea),
+        "has_active_update": request.is_active is not None,
+    })
     
     try:
         registry = get_tool_registry()
@@ -174,13 +232,20 @@ async def update_tool(tool_id: str, request: ToolUpdate) -> ToolResponse:
                 request.video_prompt_template = enhanced.video_prompt_template
         
         tool = await registry.update(tool_id, request)
-        logger.info(f"Tool updated: {tool_id}")
+        log_success(logger, f"Tool updated: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "PUT", f"/api/v1/tools/{tool_id}", 200, duration_ms)
         return tool
         
     except ToolNotFoundError:
+        log_warning_msg(logger, f"Tool not found: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "PUT", f"/api/v1/tools/{tool_id}", 404, duration_ms)
         raise HTTPException(status_code=404, detail=f"Tool not found: {tool_id}")
     except Exception as e:
-        logger.error(f"Failed to update tool: {e}")
+        log_error_msg(logger, f"Failed to update tool: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "PUT", f"/api/v1/tools/{tool_id}", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -198,7 +263,12 @@ async def improve_tool(tool_id: str, request: ToolImproveRequest) -> ToolRespons
         tool_id: Tool to improve
         request: Improvement suggestion and options
     """
-    logger.info(f"Improving tool: {tool_id}")
+    start_time = time.time()
+    log_header(logger, f"IMPROVE TOOL: {tool_id}")
+    log_request_start(logger, "POST", f"/api/v1/tools/{tool_id}/improve", {
+        "suggestion_length": len(request.improvement_suggestion),
+        "preserve_templates": request.preserve_templates,
+    })
     
     try:
         registry = get_tool_registry()
@@ -219,13 +289,20 @@ async def improve_tool(tool_id: str, request: ToolImproveRequest) -> ToolRespons
             improvement_suggestion=request.improvement_suggestion,
         )
         
-        logger.info(f"Tool improved: {tool_id} (v{tool.version})")
+        log_success(logger, f"Tool improved: {tool_id} (v{tool.version})")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/improve", 200, duration_ms)
         return tool
         
     except ToolNotFoundError:
+        log_warning_msg(logger, f"Tool not found: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/improve", 404, duration_ms)
         raise HTTPException(status_code=404, detail=f"Tool not found: {tool_id}")
     except Exception as e:
-        logger.error(f"Failed to improve tool: {e}")
+        log_error_msg(logger, f"Failed to improve tool: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/improve", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -240,19 +317,28 @@ async def delete_tool(tool_id: str) -> DeleteResponse:
     Args:
         tool_id: Tool to delete
     """
-    logger.info(f"Deleting tool: {tool_id}")
+    start_time = time.time()
+    log_request_start(logger, "DELETE", f"/api/v1/tools/{tool_id}")
     
     try:
-        registry = get_tool_registry()
-        await registry.delete(tool_id)
+        with log_operation(logger, "Delete tool"):
+            registry = get_tool_registry()
+            await registry.delete(tool_id)
         
-        logger.info(f"Tool deleted: {tool_id}")
+        log_success(logger, f"Tool deleted: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "DELETE", f"/api/v1/tools/{tool_id}", 200, duration_ms)
         return DeleteResponse(success=True, tool_id=tool_id)
         
     except ToolNotFoundError:
+        log_warning_msg(logger, f"Tool not found: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "DELETE", f"/api/v1/tools/{tool_id}", 404, duration_ms)
         raise HTTPException(status_code=404, detail=f"Tool not found: {tool_id}")
     except Exception as e:
-        logger.error(f"Failed to delete tool: {e}")
+        log_error_msg(logger, f"Failed to delete tool: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "DELETE", f"/api/v1/tools/{tool_id}", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -271,7 +357,12 @@ async def execute_tool(tool_id: str, request: ToolExecutionRequest) -> ToolExecu
         tool_id: Tool to execute
         request: Topic and optional parameters
     """
-    logger.info(f"Executing tool: {tool_id} for topic: {request.topic[:50]}...")
+    start_time = time.time()
+    log_subheader(logger, f"EXECUTE TOOL: {tool_id}")
+    log_request_start(logger, "POST", f"/api/v1/tools/{tool_id}/execute", {
+        "topic": request.topic[:60] + "..." if len(request.topic) > 60 else request.topic,
+        "has_params": bool(request.parameters),
+    })
     
     try:
         # Get tool
@@ -284,20 +375,31 @@ async def execute_tool(tool_id: str, request: ToolExecutionRequest) -> ToolExecu
         if not tool.is_active:
             raise HTTPException(status_code=400, detail=f"Tool is not active: {tool_id}")
         
-        # Execute
-        executor = get_tool_executor()
-        result = await executor.execute(tool, request)
+        with log_operation(logger, "Execute tool"):
+            executor = get_tool_executor()
+            result = await executor.execute(tool, request)
         
         # Update usage stats (non-blocking)
         await registry.increment_usage(tool_id)
         
-        logger.info(f"Tool executed: {tool_id}")
+        log_success(logger, f"Tool executed: {tool_id}")
+        log_key_value(logger, "Estimated generation time", f"{result.estimated_generation_time:.1f}s")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/execute", 200, duration_ms)
         return result
         
     except ParameterValidationError as e:
+        log_warning_msg(logger, f"Parameter validation error: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/execute", 422, duration_ms)
         raise HTTPException(status_code=422, detail=str(e))
     except ToolNotFoundError:
+        log_warning_msg(logger, f"Tool not found: {tool_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/execute", 404, duration_ms)
         raise HTTPException(status_code=404, detail=f"Tool not found: {tool_id}")
     except Exception as e:
-        logger.error(f"Failed to execute tool: {e}")
+        log_error_msg(logger, f"Failed to execute tool: {e}")
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/execute", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))

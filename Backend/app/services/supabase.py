@@ -154,10 +154,13 @@ class SupabaseService:
     Reference: PHASE2_3_DEEP_RESEARCH_PLAN.md
     """
     
+    STORAGE_BUCKET = "media"  # Single bucket for all media files
+    
     def __init__(self):
         self._client: Optional[Client] = None
         self._workflow_repo: Optional[WorkflowRepository] = None
         self._logger = get_logger(f"{__name__}.SupabaseService")
+        self._bucket_verified: set[str] = set()  # Track verified buckets
     
     @property
     def client(self) -> Client:
@@ -181,6 +184,57 @@ class SupabaseService:
         """Update a workflow record."""
         return await self.workflows.update(workflow_id, updates)
     
+    async def _ensure_bucket_exists(self, bucket: str) -> bool:
+        """
+        Ensure the storage bucket exists, create if it doesn't.
+        
+        Args:
+            bucket: Bucket name to verify/create
+            
+        Returns:
+            True if bucket exists or was created, False otherwise
+        """
+        if bucket in self._bucket_verified:
+            return True
+        
+        try:
+            # Use list_buckets to check if bucket exists
+            buckets = self.client.storage.list_buckets()
+            bucket_names = [b.name for b in buckets] if buckets else []
+            
+            if bucket in bucket_names:
+                self._bucket_verified.add(bucket)
+                self._logger.info(f"Storage bucket '{bucket}' verified")
+                return True
+            
+            # Bucket doesn't exist, try to create it
+            self._logger.info(f"Bucket '{bucket}' not found, creating...")
+            self.client.storage.create_bucket(
+                bucket,
+                options={
+                    "public": True,
+                    "file_size_limit": 52428800,  # 50MB
+                    "allowed_mime_types": [
+                        "image/jpeg", "image/png", "image/webp", "image/gif",
+                        "video/mp4", "video/webm", "audio/mpeg", "audio/wav"
+                    ]
+                }
+            )
+            self._bucket_verified.add(bucket)
+            self._logger.info(f"Storage bucket '{bucket}' created successfully")
+            return True
+            
+        except Exception as e:
+            error_str = str(e)
+            # Check if bucket already exists (race condition or API quirk)
+            if "already exists" in error_str.lower() or "duplicate" in error_str.lower():
+                self._bucket_verified.add(bucket)
+                self._logger.info(f"Storage bucket '{bucket}' already exists")
+                return True
+            
+            self._logger.error(f"Failed to ensure bucket '{bucket}' exists: {e}")
+            return False
+    
     async def upload_file(
         self,
         bucket: str,
@@ -200,6 +254,11 @@ class SupabaseService:
         Returns:
             Public URL if successful, None otherwise
         """
+        # Ensure bucket exists before upload
+        if not await self._ensure_bucket_exists(bucket):
+            self._logger.warning(f"Bucket '{bucket}' not available, skipping upload")
+            return None
+        
         try:
             self._logger.info(f"Uploading to {bucket}/{path}")
             

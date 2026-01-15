@@ -171,7 +171,6 @@ Generate a complete tool configuration following the schema requirements."""
             response_model=ToolEnhancementResponse,
             model=GEMINI_3_FLASH,
             system_instruction=TOOL_ENHANCEMENT_SYSTEM_PROMPT,
-            thinking_level="low",
         )
         
         # Ensure tool_id is properly formatted
@@ -227,7 +226,6 @@ Generate an improved version of this tool. Keep the same tool_id."""
             response_model=ToolEnhancementResponse,
             model=GEMINI_3_FLASH,
             system_instruction=TOOL_IMPROVEMENT_SYSTEM_PROMPT,
-            thinking_level="low",
         )
         
         # Keep the original tool_id

@@ -19,8 +19,8 @@ T = TypeVar("T", bound=BaseModel)
 
 GEMINI_3_FLASH = "gemini-3-flash-preview"
 GEMINI_3_PRO = "gemini-3-pro-preview"
-GEMINI_2_5_FLASH = "gemini-2.5-flash-preview-05-20"
-GEMINI_2_5_PRO = "gemini-2.5-pro-preview-06-05"
+GEMINI_2_5_FLASH = "gemini-2.5-flash"  # Stable version (preview was deprecated)
+GEMINI_2_5_PRO = "gemini-2.5-pro"  # Stable version
 
 
 class GeminiServiceError(Exception):
@@ -74,7 +74,7 @@ class GeminiService:
         response_model: Type[T],
         model: str = GEMINI_3_FLASH,
         system_instruction: Optional[str] = None,
-        thinking_level: str = "low",
+        thinking_budget: int = 0,
         temperature: float = 1.0,
         max_retries: int = 3,
     ) -> T:
@@ -86,7 +86,7 @@ class GeminiService:
             response_model: Pydantic model class for response
             model: Gemini model to use
             system_instruction: Optional system instruction
-            thinking_level: Thinking depth (minimal, low, medium, high)
+            thinking_budget: Token budget for thinking (0 = disabled, default for structured output)
             temperature: Generation temperature (default 1.0 per Gemini 3 docs)
             max_retries: Number of retry attempts
             
@@ -105,10 +105,14 @@ class GeminiService:
             "temperature": temperature,
         }
         
-        if thinking_level != "high":
+        # Disable thinking for structured output to avoid thought_signature warnings
+        # Thinking is not needed for JSON schema-constrained output
+        try:
             config["thinking_config"] = types.ThinkingConfig(
-                thinking_level=thinking_level
+                thinking_budget=thinking_budget
             )
+        except Exception as e:
+            logger.debug(f"ThinkingConfig not supported: {e}")
         
         contents = prompt
         if system_instruction:
@@ -118,7 +122,7 @@ class GeminiService:
         for attempt in range(max_retries):
             try:
                 logger.debug(f"Gemini API call attempt {attempt + 1}/{max_retries}")
-                logger.debug(f"Model: {model}, thinking_level: {thinking_level}")
+                logger.debug(f"Model: {model}, thinking_budget: {thinking_budget}")
                 
                 response = await asyncio.to_thread(
                     client.models.generate_content,
@@ -151,7 +155,7 @@ class GeminiService:
         prompt: str,
         model: str = GEMINI_3_FLASH,
         system_instruction: Optional[str] = None,
-        thinking_level: str = "high",
+        thinking_budget: int = 0,
         temperature: float = 1.0,
         max_output_tokens: Optional[int] = None,
     ) -> str:
@@ -162,7 +166,7 @@ class GeminiService:
             prompt: User prompt
             model: Gemini model to use
             system_instruction: Optional system instruction
-            thinking_level: Thinking depth
+            thinking_budget: Token budget for thinking (0 = disabled by default)
             temperature: Generation temperature
             max_output_tokens: Max tokens in response
             
@@ -175,10 +179,13 @@ class GeminiService:
             "temperature": temperature,
         }
         
-        if thinking_level != "high":
+        # Disable thinking by default to avoid thought_signature warnings
+        try:
             config["thinking_config"] = types.ThinkingConfig(
-                thinking_level=thinking_level
+                thinking_budget=thinking_budget
             )
+        except Exception as e:
+            logger.debug(f"ThinkingConfig not supported: {e}")
         
         if system_instruction:
             config["system_instruction"] = system_instruction
@@ -205,7 +212,7 @@ class GeminiService:
         prompt: str,
         model: str = GEMINI_3_PRO,
         system_instruction: Optional[str] = None,
-        thinking_level: str = "high",
+        thinking_budget: int = 8192,
     ) -> tuple[str, list[dict[str, Any]]]:
         """
         Generate text with Google Search grounding.
@@ -214,7 +221,7 @@ class GeminiService:
             prompt: User prompt
             model: Gemini model (Pro recommended for grounding)
             system_instruction: Optional system instruction
-            thinking_level: Thinking depth
+            thinking_budget: Token budget for thinking (must be >0 for Gemini 3 Pro with grounding)
             
         Returns:
             Tuple of (generated_text, citations)
@@ -226,10 +233,17 @@ class GeminiService:
             "temperature": 1.0,
         }
         
-        if thinking_level != "high":
+        # Gemini 3 Pro with grounding REQUIRES thinking mode enabled (budget > 0)
+        # Error: "Budget 0 is invalid. This model only works in thinking mode."
+        if thinking_budget <= 0:
+            thinking_budget = 8192  # Default for grounding
+        
+        try:
             config["thinking_config"] = types.ThinkingConfig(
-                thinking_level=thinking_level
+                thinking_budget=thinking_budget
             )
+        except Exception as e:
+            logger.debug(f"ThinkingConfig not supported: {e}")
         
         if system_instruction:
             config["system_instruction"] = system_instruction
@@ -270,7 +284,7 @@ class GeminiService:
         response_model: Type[T],
         model: str = GEMINI_3_FLASH,
         system_instruction: Optional[str] = None,
-        thinking_level: str = "low",
+        thinking_budget: Optional[int] = None,
     ) -> T:
         """
         Synchronous version of generate_structured_output.
@@ -283,7 +297,7 @@ class GeminiService:
                 response_model=response_model,
                 model=model,
                 system_instruction=system_instruction,
-                thinking_level=thinking_level,
+                thinking_budget=thinking_budget,
             )
         )
 

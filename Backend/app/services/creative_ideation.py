@@ -243,7 +243,6 @@ Focus on visual storytelling suitable for {tool_category} style."""
                 prompt=prompt,
                 response_model=ParsedCreativeOutput,
                 model=GEMINI_3_PRO,
-                thinking_level="medium",
             )
             
             characters = [

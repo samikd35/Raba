@@ -95,12 +95,33 @@ open http://localhost:8000/docs
 
 ## API Endpoints
 
+### Video Generation
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check |
 | `POST` | `/api/v1/generate` | Create video generation workflow |
+| `POST` | `/api/v1/generate/with-image` | Create workflow with reference image |
 | `GET` | `/api/v1/workflows/{id}` | Get workflow status |
-| `GET` | `/api/v1/workflows` | List workflows |
+| `GET` | `/api/v1/workflows` | List workflows (paginated) |
+| `DELETE` | `/api/v1/workflows/{id}` | Delete workflow |
+
+### HITL (Human-in-the-Loop)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/workflows/{id}/feedback` | Submit HITL feedback |
+| `GET` | `/api/v1/workflows/{id}/gate` | Get current gate status |
+| `GET` | `/api/v1/workflows/{id}/gate/{name}/output` | Get gate output |
+
+### Monitoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/monitoring/summary` | Usage summary (tokens, costs) |
+| `GET` | `/api/v1/monitoring/video/{id}` | Video usage breakdown |
+| `GET` | `/api/v1/monitoring/pricing` | Current model pricing |
+
+### Health
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check with service status |
 
 ### Create Workflow
 
@@ -165,22 +186,30 @@ ruff check app/ tests/
 - [x] API scaffold
 - [x] LangGraph base
 
-### Phase 2: Core Agents (Pending)
-- [ ] Intent/Tool Selector
-- [ ] Deep Research
-- [ ] Script Generator
-- [ ] Tool Repository
+### Phase 2: Core Agents ✅
+- [x] Intent/Tool Selector
+- [x] Deep Research (with caching)
+- [x] Script Generator
+- [x] Tool Repository
 
-### Phase 3: Generation (Pending)
-- [ ] Image Generator
-- [ ] Video Generator
-- [ ] Output Processing
+### Phase 3: Generation ✅
+- [x] Image Generator (Nano Banana Pro)
+- [x] Video Generator (Veo 3.1)
+- [x] Output Processing
 
-### Phase 4: Advanced (Pending)
-- [ ] HITL System
-- [ ] Multi-segment Video
-- [ ] Caching Layer
-- [ ] Monitoring
+### Phase 4: Advanced ✅
+- [x] HITL System (5 gates)
+- [x] Multi-segment Video
+- [x] Caching Layer (Redis)
+- [x] Rate Limiting
+- [x] API Completion
+
+### Phase 5: Production Readiness ✅
+- [x] Input Sanitization
+- [x] Content Safety Filters
+- [x] Token/Cost Monitoring
+- [x] E2E Tests
+- [x] Documentation
 
 ## Documentation
 
