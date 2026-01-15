@@ -140,6 +140,77 @@ class WorkflowRepository:
         """
         self._logger.info(f"Updating workflow {workflow_id} status to: {status}")
         return await self.update(workflow_id, {"status": status})
+    
+    async def list(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        status_filter: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        List workflows with pagination and optional status filter.
+        
+        Args:
+            limit: Maximum number of workflows to return
+            offset: Number of workflows to skip
+            status_filter: Optional status filter (pending, running, completed, failed)
+            
+        Returns:
+            Dictionary with 'data' (list of workflows) and 'count' (total count)
+        """
+        self._logger.info(f"Listing workflows: limit={limit}, offset={offset}, status_filter={status_filter}")
+        
+        query = self.client.table(self.TABLE_NAME).select("*", count="exact")
+        
+        # Apply status filter if provided
+        if status_filter:
+            query = query.eq("status", status_filter)
+        
+        # Apply ordering (newest first)
+        query = query.order("created_at", desc=True)
+        
+        # Apply pagination
+        query = query.range(offset, offset + limit - 1)
+        
+        response = query.execute()
+        
+        workflows = response.data or []
+        total_count = response.count if hasattr(response, 'count') and response.count is not None else len(workflows)
+        
+        self._logger.info(f"Found {len(workflows)} workflows (total: {total_count})")
+        
+        return {
+            "data": workflows,
+            "count": total_count,
+        }
+    
+    async def delete(self, workflow_id: str) -> bool:
+        """
+        Delete workflow by ID (soft delete by marking as deleted).
+        
+        Args:
+            workflow_id: Workflow UUID to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        self._logger.info(f"Deleting workflow: {workflow_id}")
+        
+        # Soft delete by updating status and adding deleted_at timestamp
+        from datetime import datetime, timezone
+        updates = {
+            "status": "deleted",
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        result = await self.update(workflow_id, updates)
+        
+        if result:
+            self._logger.info(f"Workflow {workflow_id} deleted successfully")
+            return True
+        
+        self._logger.warning(f"Failed to delete workflow: {workflow_id}")
+        return False
 
 
 def get_workflow_repository() -> WorkflowRepository:

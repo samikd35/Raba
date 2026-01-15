@@ -60,11 +60,65 @@ async def get_usage_summary(
                 start_date=start_date,
                 end_date=end_date,
             )
+            
+            # Get workflow counts from database
+            from app.services.supabase import get_workflow_repository
+            repo = get_workflow_repository()
+            
+            # Get all workflows in the period
+            workflows_response = (
+                repo.client.table("workflows")
+                .select("id,status,created_at,completed_at")
+                .gte("created_at", start_date.isoformat())
+                .lte("created_at", end_date.isoformat())
+                .execute()
+            )
+            workflows = workflows_response.data or []
+            
+            total_videos = len(workflows)
+            completed_videos = sum(1 for w in workflows if w.get("status") == "completed")
+            failed_videos = sum(1 for w in workflows if w.get("status") == "failed")
+            
+            # Calculate average generation time
+            generation_times = []
+            for w in workflows:
+                if w.get("completed_at") and w.get("created_at"):
+                    try:
+                        start = datetime.fromisoformat(w["created_at"].replace("Z", "+00:00"))
+                        end = datetime.fromisoformat(w["completed_at"].replace("Z", "+00:00"))
+                        generation_times.append((end - start).total_seconds())
+                    except Exception:
+                        pass
+            
+            avg_generation_time = sum(generation_times) / len(generation_times) if generation_times else 0.0
+            avg_cost_per_video = summary.get("total_cost_usd", 0.0) / total_videos if total_videos > 0 else 0.0
+            
+            # Transform to frontend-expected format
+            # success_rate and cache_hit_rate are already percentages (0-100), convert to decimal (0-1)
+            success_rate = summary.get("success_rate", 0.0) / 100.0
+            cache_hit_rate = summary.get("cache_hit_rate", 0.0) / 100.0
+            
+            # Transform by_type to by_generation_type
+            by_generation_type = {}
+            for gen_type, data in summary.get("by_type", {}).items():
+                by_generation_type[gen_type] = {
+                    "tokens": data.get("tokens", 0),
+                    "cost_usd": data.get("cost_usd", 0.0),
+                    "count": data.get("count", 0),
+                }
+            
+            # Transform by_model
+            by_model = {}
+            for model, data in summary.get("by_model", {}).items():
+                by_model[model] = {
+                    "tokens": data.get("tokens", 0),
+                    "cost_usd": data.get("cost_usd", 0.0),
+                    "calls": data.get("count", 0),
+                }
         
         log_success(logger, f"Usage summary retrieved for {days} days")
-        if summary.get("totals"):
-            log_key_value(logger, "Total cost", f"${summary['totals'].get('total_cost_usd', 0):.2f}")
-            log_key_value(logger, "Total videos", summary['totals'].get('total_videos', 0))
+        log_key_value(logger, "Total cost", f"${summary.get('total_cost_usd', 0):.2f}")
+        log_key_value(logger, "Total videos", total_videos)
         
         duration_ms = (time.time() - start_time) * 1000
         log_request_end(logger, "GET", "/api/v1/monitoring/summary", 200, duration_ms)
@@ -75,7 +129,21 @@ async def get_usage_summary(
                 "end": end_date.isoformat(),
                 "days": days,
             },
-            **summary,
+            "totals": {
+                "total_tokens": summary.get("total_tokens", 0),
+                "total_cost_usd": summary.get("total_cost_usd", 0.0),
+                "total_videos": total_videos,
+                "completed_videos": completed_videos,
+                "failed_videos": failed_videos,
+            },
+            "by_generation_type": by_generation_type,
+            "by_model": by_model,
+            "metrics": {
+                "success_rate": success_rate,
+                "cache_hit_rate": cache_hit_rate,
+                "avg_generation_time_seconds": round(avg_generation_time, 2),
+                "avg_cost_per_video_usd": round(avg_cost_per_video, 4),
+            },
         }
         
     except Exception as e:
@@ -144,18 +212,33 @@ async def get_pricing():
     
     from app.services.monitoring import CostCalculator
     
+    # Transform pricing to frontend-expected format
+    pricing_dict = {}
+    for model, prices in CostCalculator.PRICING.items():
+        if "per_second" in prices:
+            pricing_dict[model] = {
+                "unit": "per second",
+                "price": prices["per_second"],
+            }
+        elif "per_query" in prices:
+            pricing_dict[model] = {
+                "unit": "per query",
+                "price": prices["per_query"],
+            }
+        elif "per_image" in prices:
+            pricing_dict[model] = {
+                "unit": "per image + tokens",
+                "price": prices.get("per_image", 0),
+            }
+        else:
+            # Text models - use output price as primary
+            pricing_dict[model] = {
+                "unit": "per million tokens",
+                "price": prices.get("output", prices.get("input", 0)),
+            }
+    
     log_success(logger, "Pricing information retrieved")
     duration_ms = (time.time() - start_time) * 1000
     log_request_end(logger, "GET", "/api/v1/monitoring/pricing", 200, duration_ms)
     
-    return {
-        "pricing": CostCalculator.PRICING,
-        "notes": {
-            "text_models": "Prices are per million tokens",
-            "image_models": "Includes per-image charge plus token cost",
-            "video_models": "Price is per second of generated video",
-            "research": "Flat rate per research query",
-        },
-        "currency": "USD",
-        "last_updated": "2026-01-15",
-    }
+    return pricing_dict
