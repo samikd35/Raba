@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     langchain_project: str = Field(default="Raba", description="LangSmith project name")
     
     # === Video Generation Defaults ===
-    default_duration_seconds: int = Field(default=18, ge=8, le=25)
+    default_duration_seconds: int = Field(default=18, ge=8, le=60)
     default_aspect_ratio: str = Field(default="9:16")
     default_resolution: str = Field(default="1080p")
     default_category: str = Field(default="auto")

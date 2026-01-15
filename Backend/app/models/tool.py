@@ -114,9 +114,9 @@ class ToolMetadata(BaseModel):
         description="Supported video resolutions"
     )
     max_duration_seconds: int = Field(
-        default=25,
+        default=60,
         ge=8,
-        le=25,
+        le=60,
         description="Maximum video duration this tool supports"
     )
     cost_per_request: float = Field(
@@ -150,8 +150,8 @@ class ValidatedParams(BaseModel):
     duration_seconds: int = Field(
         ...,
         ge=8,
-        le=25,
-        description="Validated video duration (8-25 seconds)"
+        le=60,
+        description="Validated video duration (8-60 seconds)"
     )
     aspect_ratio: AspectRatioEnum = Field(
         ...,

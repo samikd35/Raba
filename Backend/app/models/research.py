@@ -248,7 +248,7 @@ class ResearchRequest(BaseModel):
         default="surreal_realism",
         description="Visual style category"
     )
-    duration_seconds: int = Field(default=18, ge=8, le=25)
+    duration_seconds: int = Field(default=18, ge=8, le=60)
     research_depth: str = Field(
         default="standard",
         description="Research depth: quick, standard, deep"

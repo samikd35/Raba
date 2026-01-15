@@ -630,13 +630,13 @@ class VideoGeneratorAgent:
                     "generation_time_ms": output.total_generation_time_ms,
                     "reference_images_used": output.reference_images.selected_urls,
                 },
-                "final_video_url": output.video.url,
                 "updated_at": utc_now_iso(),
             }).eq("id", workflow_id).execute()
             
             self.supabase.table("media").insert({
                 "workflow_id": workflow_id,
-                "media_type": "final_video",
+                "media_type": "video",  # Allowed: image, video, audio
+                "source": "generated",  # Allowed: user_upload, research, generated
                 "storage_url": output.video.url,
                 "storage_path": output.video.storage_path,
                 "file_size_bytes": output.video.file_size_bytes,

@@ -134,7 +134,7 @@ class VideoGenerationConfig(BaseModel):
     target_duration_seconds: int = Field(
         default=18,
         ge=8,
-        le=25,
+        le=60,
         description="Target total video duration"
     )
     enable_audio: bool = Field(
@@ -394,7 +394,7 @@ class VideoGenerationRequest(BaseModel):
     duration_seconds: int = Field(
         default=18,
         ge=8,
-        le=25,
+        le=60,
         description="Target video duration"
     )
     enable_audio: bool = Field(

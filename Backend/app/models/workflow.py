@@ -63,8 +63,8 @@ class WorkflowInput(BaseModel):
     duration_seconds: int = Field(
         default=18,
         ge=8,
-        le=25,
-        description="Video duration in seconds (8-25)"
+        le=60,
+        description="Video duration in seconds (8-60)"
     )
     
     aspect_ratio: AspectRatioEnum = Field(

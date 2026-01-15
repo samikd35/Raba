@@ -549,8 +549,8 @@ class ImageGeneratorAgent:
             for img in output.generated_images:
                 self.supabase.table("media").insert({
                     "workflow_id": workflow_id,
-                    "media_type": "generated_image",
-                    "source": "nano_banana",  # Required column - image generation source
+                    "media_type": "image",  # Allowed: image, video, audio
+                    "source": "generated",  # Allowed: user_upload, research, generated
                     "storage_url": img.url,
                     "storage_path": img.storage_path,
                     "metadata": {

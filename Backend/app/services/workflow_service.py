@@ -224,9 +224,6 @@ class WorkflowService:
             update_data = {
                 "status": WorkflowStatus.COMPLETED.value,
                 "completed_at": utc_now_iso(),
-                "final_video_url": output.video.url,
-                "generation_time_seconds": output.timing.total_seconds,
-                "final_output": output.to_api_response(),
                 "current_hitl_gate": None,
                 "updated_at": utc_now_iso(),
             }

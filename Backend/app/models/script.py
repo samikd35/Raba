@@ -274,8 +274,8 @@ class ScriptOutput(BaseModel):
     total_duration_seconds: float = Field(
         ...,
         ge=8.0,
-        le=25.0,
-        description="Total script duration (8-25 seconds)"
+        le=60.0,
+        description="Total script duration (8-60 seconds)"
     )
     
     tool_category_applied: str = Field(
@@ -299,7 +299,7 @@ class ScriptOutput(BaseModel):
 class ScriptRequest(BaseModel):
     """Request model for script generation."""
     topic: str = Field(..., description="Video topic")
-    duration_seconds: int = Field(default=18, ge=8, le=25)
+    duration_seconds: int = Field(default=18, ge=8, le=60)
     intent_type: str = Field(default="educational")
     tone: str = Field(default="informative")
     target_audience: str = Field(default="general")
