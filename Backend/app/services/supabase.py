@@ -141,6 +141,52 @@ class WorkflowRepository:
         self._logger.info(f"Updating workflow {workflow_id} status to: {status}")
         return await self.update(workflow_id, {"status": status})
 
+    async def list(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        status_filter: Optional[str] = None
+    ) -> dict[str, Any]:
+        """
+        List workflows with pagination and filtering.
+        
+        Args:
+            limit: Max records to return
+            offset: Records to skip
+            status_filter: Optional status filter
+            
+        Returns:
+            Dict with 'data' (list) and 'count' (int)
+        """
+        query = self.client.table(self.TABLE_NAME).select("*", count="exact")
+        
+        if status_filter and status_filter.lower() != "all":
+            query = query.eq("status", status_filter)
+            
+        # Order by creation date descending
+        query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
+        
+        response = query.execute()
+        
+        return {
+            "data": response.data,
+            "count": response.count
+        }
+
+    async def delete(self, workflow_id: str) -> bool:
+        """
+        Delete workflow by ID.
+        
+        Args:
+            workflow_id: Workflow UUID
+            
+        Returns:
+            True if deleted
+        """
+        self._logger.info(f"Deleting workflow: {workflow_id}")
+        self.client.table(self.TABLE_NAME).delete().eq("id", workflow_id).execute()
+        return True
+
 
 def get_workflow_repository() -> WorkflowRepository:
     """Get WorkflowRepository instance."""
