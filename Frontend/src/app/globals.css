@@ -1,0 +1,158 @@
+@import "tailwindcss";
+@plugin 'tailwindcss-animate';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-border-beam: border-beam calc(var(--duration)*1s) infinite linear;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+
+    to {
+      height: 0;
+    }
+  }
+
+  @keyframes border-beam {
+    100% {
+      offset-distance: 100%;
+    }
+  }
+}
+
+/*
+  RABA Theme System
+  Using CSS variables for theme switching.
+*/
+@layer base {
+  :root {
+    /* Cloud Dancer Studio (Light Mode) */
+    --background: oklch(0.96 0.01 210);
+    /* #F2F4F7 approx */
+    --foreground: oklch(0.15 0.04 260);
+    /* #0F172A approx */
+
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.15 0.04 260);
+
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.15 0.04 260);
+
+    --primary: oklch(0.65 0.22 270);
+    /* Electric Indigo #6366F1 approx */
+    --primary-foreground: oklch(0.98 0.01 260);
+
+    --secondary: oklch(0.70 0.16 220);
+    /* Cyber Cyan #06B6D4 approx */
+    --secondary-foreground: oklch(0.98 0.01 260);
+
+    --muted: oklch(0.96 0.01 260);
+    --muted-foreground: oklch(0.45 0.03 260);
+
+    --accent: oklch(0.88 0.18 120);
+    /* Neon Lime #BEF264 approx */
+    --accent-foreground: oklch(0.15 0.04 260);
+
+    --destructive: oklch(0.6 0.2 25);
+    --destructive-foreground: oklch(0.98 0.01 260);
+
+    --border: oklch(0.92 0.02 260);
+    --input: oklch(0.92 0.02 260);
+    --ring: oklch(0.65 0.22 270);
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    /* Bioluminescent Void (Dark Mode) */
+    --background: oklch(0.12 0.01 260);
+    /* #09090B approx */
+    --foreground: oklch(0.98 0.01 260);
+
+    --card: oklch(0.15 0.01 260);
+    /* #121217 approx */
+    --card-foreground: oklch(0.98 0.01 260);
+
+    --popover: oklch(0.12 0.01 260);
+    --popover-foreground: oklch(0.98 0.01 260);
+
+    --primary: oklch(0.65 0.22 270);
+    /* Electric Indigo */
+    --primary-foreground: oklch(0.98 0.01 260);
+
+    --secondary: oklch(0.70 0.16 220);
+    /* Cyber Cyan */
+    --secondary-foreground: oklch(0.98 0.01 260);
+
+    --muted: oklch(0.25 0.02 260);
+    --muted-foreground: oklch(0.65 0.03 260);
+
+    --accent: oklch(0.88 0.18 120);
+    /* Neon Lime */
+    --accent-foreground: oklch(0.15 0.04 260);
+
+    --destructive: oklch(0.4 0.15 25);
+    --destructive-foreground: oklch(0.98 0.01 260);
+
+    --border: oklch(0.25 0.02 260);
+    /* Approx white/8% */
+    --input: oklch(0.25 0.02 260);
+    --ring: oklch(0.65 0.22 270);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
