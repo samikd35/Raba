@@ -19,6 +19,9 @@ class WorkflowStatus(str, Enum):
     AWAITING_SCRIPT_APPROVAL = "awaiting_script_approval"
     AWAITING_IMAGE_APPROVAL = "awaiting_image_approval"
     AWAITING_VIDEO_APPROVAL = "awaiting_video_approval"
+    RESEARCH_COMPLETE = "research_complete"
+    SCRIPT_COMPLETE = "script_complete"
+    IMAGE_COMPLETE = "image_complete"
     COMPLETED = "completed"
     FAILED = "failed"
 

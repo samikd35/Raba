@@ -162,7 +162,7 @@ async def get_workflow(workflow_id: str) -> WorkflowOutput:
 async def list_workflows(
     limit: int = Query(default=20, ge=1, le=100, description="Max workflows to return"),
     offset: int = Query(default=0, ge=0, description="Number to skip"),
-    status: Optional[str] = Query(default=None, description="Filter by status"),
+    status_filter: Optional[str] = Query(default=None, alias="status", description="Filter by status"),
 ):
     """
     List workflows with pagination and filtering.
@@ -170,7 +170,7 @@ async def list_workflows(
     Args:
         limit: Maximum number of workflows to return (1-100)
         offset: Number of workflows to skip
-        status: Optional status filter (pending, running, completed, failed)
+        status_filter: Optional status filter (pending, running, completed, failed)
         
     Returns:
         Paginated list of workflows with metadata
@@ -179,7 +179,7 @@ async def list_workflows(
     log_request_start(logger, "GET", "/api/v1/workflows", {
         "limit": limit,
         "offset": offset,
-        "status_filter": status or "all",
+        "status_filter": status_filter or "all",
     })
     
     try:
@@ -189,7 +189,7 @@ async def list_workflows(
         result = await repo.list(
             limit=limit,
             offset=offset,
-            status_filter=status,
+            status_filter=status_filter,
         )
         
         workflows = result.get("data", [])
