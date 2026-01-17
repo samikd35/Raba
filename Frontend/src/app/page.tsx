@@ -17,6 +17,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { api } from '@/lib/api'
 import { BorderBeam } from '@/components/ui/border-beam'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import Link from 'next/link'
+
+type ToolListItem = {
+  tool_id: string
+  tool_name: string
+  category: string
+  is_active: boolean
+}
 
 const formSchema = z.object({
   topic: z.string().min(3, {
@@ -28,15 +37,19 @@ const formSchema = z.object({
   aspect_ratio: z.string(),
   resolution: z.string(),
   category: z.string(),
+  tool_id: z.string().optional().nullable(),
   hitl_mode: z.enum(["auto", "manual"]),
   enable_audio: z.boolean(),
   enable_subtitles: z.boolean(),
+  video_model: z.enum(["veo_3_1", "veo_3_1_fast"]),
 })
 
 export default function CreatePage() {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [tools, setTools] = useState<ToolListItem[] | null>(null)
+  const [isLoadingTools, setIsLoadingTools] = useState(false)
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -46,9 +59,11 @@ export default function CreatePage() {
       aspect_ratio: "9:16",
       resolution: "1080p",
       category: "auto",
+      tool_id: null,
       hitl_mode: "auto",
       enable_audio: true,
       enable_subtitles: false,
+      video_model: "veo_3_1",
     },
   })
 
@@ -76,6 +91,33 @@ export default function CreatePage() {
     if (fileInput) fileInput.value = ''
   }
 
+  // Dynamically fetch tools when category changes (non-auto)
+  React.useEffect(() => {
+    const category = form.watch('category')
+    if (!category) return
+
+    // Reset tool selection on category change
+    form.setValue('tool_id', null)
+
+    if (category === 'auto') {
+      setTools(null)
+      return
+    }
+
+    ;(async () => {
+      try {
+        setIsLoadingTools(true)
+        const res = await api.get<{ tools: ToolListItem[]; total: number }>(`/tools?category=${encodeURIComponent(category)}&is_active=true&limit=100`)
+        setTools((res?.tools || []).filter(t => t.is_active))
+      } catch (e) {
+        setTools([])
+      } finally {
+        setIsLoadingTools(false)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.watch('category')])
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsSubmitting(true)
     try {
@@ -89,9 +131,13 @@ export default function CreatePage() {
         formData.append('aspect_ratio', values.aspect_ratio)
         formData.append('resolution', values.resolution)
         formData.append('category', values.category)
+        if (values.tool_id) {
+          formData.append('tool_id', values.tool_id)
+        }
         formData.append('hitl_mode', values.hitl_mode)
         formData.append('enable_audio', String(values.enable_audio))
         formData.append('enable_subtitles', String(values.enable_subtitles))
+        formData.append('video_model', values.video_model)
         formData.append('reference_image', selectedFile)
 
         response = await api.postMultipart<{ workflow_id: string }>('/generate/with-image', formData)
@@ -170,6 +216,28 @@ export default function CreatePage() {
                             {selectedFile ? 'Change Image' : 'Attach Image'}
                           </Button>
 
+                          {/* Model Picker Dropdown */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs rounded-full shadow-sm hover:bg-muted"
+                              >
+                                {form.watch('video_model') === 'veo_3_1' ? 'Model: Veo 3.1' : 'Model: Veo 3.1 Fast'}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="min-w-[12rem]">
+                              <DropdownMenuItem onClick={() => form.setValue('video_model', 'veo_3_1')}>
+                                Veo 3.1 (Quality)
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => form.setValue('video_model', 'veo_3_1_fast')}>
+                                Veo 3.1 Fast (Speed)
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+
                           {selectedFile && (
                             <div className="flex items-center gap-2 bg-background/80 rounded-full px-3 py-1 border text-xs animate-in fade-in zoom-in">
                               <span className="max-w-[100px] truncate">{selectedFile.name}</span>
@@ -234,6 +302,69 @@ export default function CreatePage() {
                           <SelectItem value="stylized_3d">Stylized 3D</SelectItem>
                         </SelectContent>
                       </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {/* Tool selector (optional), enabled when category != auto */}
+                <FormField
+                  control={form.control}
+                  name="tool_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex items-center justify-between">
+                        <FormLabel>Tool (Optional)</FormLabel>
+                        {form.watch('category') !== 'auto' && (
+                          <div className="flex items-center gap-3">
+                            <Link
+                              href={`/tools${form.watch('category') ? `?category=${encodeURIComponent(form.watch('category'))}` : ''}`}
+                              className="text-primary hover:underline text-xs"
+                              target="_blank"
+                            >
+                              View tools
+                            </Link>
+                            {form.watch('tool_id') && (
+                              <Link
+                                href={`/tools?tool=${encodeURIComponent(form.watch('tool_id') || '')}${form.watch('category') ? `&category=${encodeURIComponent(form.watch('category'))}` : ''}`}
+                                className="text-primary hover:underline text-xs"
+                                target="_blank"
+                              >
+                                View tool details
+                              </Link>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value ?? undefined}
+                        disabled={form.watch('category') === 'auto' || isLoadingTools || (tools?.length ?? 0) === 0}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={
+                                form.watch('category') === 'auto'
+                                  ? 'Select a category to choose a tool'
+                                  : isLoadingTools
+                                    ? 'Loading tools...'
+                                    : (tools?.length ?? 0) === 0
+                                      ? 'No tools available in this category'
+                                      : 'Select a tool (optional)'
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {(tools || []).map((t) => (
+                            <SelectItem key={t.tool_id} value={t.tool_id}>
+                              {t.tool_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {/* Links moved beside the picker label for better use of space */}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -334,7 +465,7 @@ export default function CreatePage() {
                     render={({ field }) => (
                       <FormItem className="flex flex-row items-center justify-between rounded-lg p-0 space-y-0">
                         <div className="space-y-0.5">
-                          <FormLabel className="text-sm font-medium">Burn-in Subtitles</FormLabel>
+                          <FormLabel className="text-sm font-medium">Subtitles</FormLabel>
                         </div>
                         <FormControl>
                           <Switch

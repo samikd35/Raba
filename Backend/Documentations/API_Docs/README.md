@@ -2,7 +2,7 @@
 
 ## Overview
 
-RABA (AI-Powered Multi-Agent YouTube Shorts Generator) provides a comprehensive REST API for generating viral YouTube Shorts (8-25 seconds) using a multi-agent pipeline.
+RABA (AI-Powered Multi-Agent YouTube Shorts Generator) provides a comprehensive REST API for generating viral YouTube Shorts (8–60 seconds) using a multi-agent pipeline.
 
 **Base URL:** `http://localhost:8000`  
 **API Version:** `v1`  

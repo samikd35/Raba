@@ -4,6 +4,8 @@ Node functions for each agent in the video generation workflow.
 """
 
 from app.agents.intent_tool_selector import IntentToolSelectorAgent
+from app.models.tool import ToolMetadata, ToolCapabilities
+from app.models.workflow import CategoryEnum
 from app.graph.state import VideoGenerationState
 from app.utils.helpers import utc_now_iso
 from app.utils.logging import (
@@ -56,7 +58,72 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
     log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
     
     try:
-        agent = IntentToolSelectorAgent()
+        # Build tool list honoring user overrides
+        tools_metadata: list[ToolMetadata] = []
+        try:
+            from app.tools.registry import get_tool_registry
+            registry = get_tool_registry()
+            user_tool_id = state.get("user_selected_tool_id")
+            category_value = state.get("category", "auto") or "auto"
+            forced_category = None
+            try:
+                if category_value != "auto":
+                    forced_category = CategoryEnum(category_value)
+            except Exception:
+                forced_category = None
+
+            if user_tool_id:
+                # Enforce specific tool
+                tool = await registry.get_by_tool_id(user_tool_id)
+                if not tool:
+                    raise ValueError(f"User-selected tool not found: {user_tool_id}")
+                # Map ToolResponse -> ToolMetadata
+                tm = ToolMetadata(
+                    tool_id=tool.tool_id,
+                    tool_name=tool.tool_name,
+                    category=CategoryEnum(tool.category),
+                    description=tool.description or "",
+                    capabilities=ToolCapabilities(**(tool.capabilities or {})),
+                    supported_aspect_ratios=["9:16", "16:9"],
+                    supported_resolutions=["720p", "1080p"],
+                    max_duration_seconds=60,
+                    cost_per_request=0.5,
+                    estimated_quality=0.8,
+                    video_prompt_template=tool.video_prompt_template,
+                    image_prompt_template=tool.image_prompt_template,
+                    example_topics=[],
+                )
+                tools_metadata = [tm]
+            else:
+                # Filter by category if provided (not auto)
+                list_result = await registry.list_tools(
+                    category=forced_category.value if forced_category else None,
+                    is_active=True,
+                    limit=100,
+                    offset=0,
+                )
+                for tr in list_result.tools:
+                    tm = ToolMetadata(
+                        tool_id=tr.tool_id,
+                        tool_name=tr.tool_name,
+                        category=CategoryEnum(tr.category),
+                        description=tr.description or "",
+                        capabilities=ToolCapabilities(**(tr.capabilities or {})),
+                        supported_aspect_ratios=["9:16", "16:9"],
+                        supported_resolutions=["720p", "1080p"],
+                        max_duration_seconds=60,
+                        cost_per_request=0.5,
+                        estimated_quality=0.8,
+                        video_prompt_template=tr.video_prompt_template,
+                        image_prompt_template=tr.image_prompt_template,
+                        example_topics=[],
+                    )
+                    tools_metadata.append(tm)
+        except Exception as reg_err:
+            logger.warning(f"Tool registry unavailable or failed to load tools: {reg_err}. Falling back to default tools.")
+            tools_metadata = None  # type: ignore[assignment]
+
+        agent = IntentToolSelectorAgent(tools=tools_metadata)
         
         result = await agent.run(
             topic=topic,
@@ -71,15 +138,39 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
         log_key_value(logger, "Tool selected", result.selected_tool.tool_name)
         log_key_value(logger, "Confidence", f"{result.confidence:.2f}")
         
+        # Build tool_selection object for database persistence
+        tool_selection_data = {
+            "selected_tool": result.selected_tool.model_dump(),
+            "intent_metadata": result.intent_metadata.model_dump(),
+            "validated_params": result.validated_params.model_dump(),
+            "tool_execution_params": result.tool_execution_params,
+            "confidence": result.confidence,
+            "fallback_used": result.fallback_used,
+            "selection_reasoning": result.selection_reasoning,
+        }
+        
         state_update = {
             "intent_metadata": result.intent_metadata.model_dump(),
             "selected_tool": result.selected_tool.model_dump(),
             "tool_execution_params": result.tool_execution_params,
+            "tool_selection": tool_selection_data,  # Add for database persistence
             "phase_timestamps": {
                 **state.get("phase_timestamps", {}),
                 "intent_tool_completed": utc_now_iso(),
             },
         }
+        
+        # Persist tool_selection to database
+        try:
+            from app.services.supabase import get_workflow_repository
+            repo = get_workflow_repository()
+            await repo.update(workflow_id, {
+                "tool_selection": tool_selection_data,
+                "updated_at": utc_now_iso(),
+            })
+            logger.info(f"Persisted tool_selection to database for workflow {workflow_id}")
+        except Exception as e:
+            log_warning_msg(logger, f"Failed to persist tool_selection: {e}")
         
         log_agent_event(logger, "IntentToolSelector", "Completed", workflow_id)
         
@@ -361,6 +452,20 @@ async def image_generator_node(state: VideoGenerationState) -> dict:
         log_success(logger, f"Generated {generated_count} images")
         log_key_value(logger, "Total images (incl. external)", all_count)
         
+        # Extract image URLs for database persistence
+        generated_image_urls = result.get("generated_images", [])
+        if isinstance(generated_image_urls, list):
+            # Extract URLs if they're objects
+            image_urls = []
+            for img in generated_image_urls:
+                if isinstance(img, str):
+                    image_urls.append(img)
+                elif isinstance(img, dict):
+                    url = img.get("url") or img.get("image_url") or img.get("storage_url")
+                    if url:
+                        image_urls.append(url)
+            generated_image_urls = image_urls
+        
         state_update = {
             "generated_images": result.get("generated_images", []),
             "all_images": result.get("all_images", []),
@@ -370,6 +475,18 @@ async def image_generator_node(state: VideoGenerationState) -> dict:
                 "image_generator_completed": utc_now_iso(),
             },
         }
+        
+        # Persist generated_images to database
+        try:
+            from app.services.supabase import get_workflow_repository
+            repo = get_workflow_repository()
+            await repo.update(workflow_id, {
+                "generated_images": generated_image_urls,  # Store as array of URLs
+                "updated_at": utc_now_iso(),
+            })
+            logger.info(f"Persisted {len(generated_image_urls)} generated images to database for workflow {workflow_id}")
+        except Exception as e:
+            log_warning_msg(logger, f"Failed to persist generated_images: {e}")
         
         log_agent_event(logger, "ImageGenerator", "Completed", workflow_id)
         

@@ -30,6 +30,12 @@ class VideoGenerationState(TypedDict, total=False):
     enable_subtitles: bool
     user_reference_image_url: Optional[str]
     
+    # User-selected tool (repository tool_id) to enforce
+    user_selected_tool_id: Optional[str]
+    
+    # User-selected Veo model (string value from app.models.video.VideoModel)
+    video_model: Optional[str]
+    
     selected_tool: Optional[dict[str, Any]]
     intent_metadata: Optional[dict[str, Any]]
     tool_execution_params: Optional[dict[str, Any]]

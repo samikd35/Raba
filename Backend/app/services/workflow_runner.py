@@ -49,7 +49,7 @@ class WorkflowRunner:
                 logger.info("Workflow graph compiled successfully")
         return self._compiled_graph
     
-    async def run_workflow(self, workflow_id: str) -> dict[str, Any]:
+    async def run_workflow(self, workflow_id: str, input_overrides: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Execute a workflow by ID.
         
         Fetches workflow data, builds initial state, and runs the LangGraph.
@@ -81,6 +81,9 @@ class WorkflowRunner:
         
         # Build initial state from workflow data
         initial_state = self._build_initial_state(workflow)
+        if input_overrides:
+            # Merge any user-provided overrides (e.g., selected video model)
+            initial_state.update(input_overrides)
         
         log_subheader(logger, "Initial State")
         log_key_value(logger, "workflow_id", workflow_id)
@@ -157,6 +160,7 @@ class WorkflowRunner:
             "enable_audio": workflow.get("enable_audio", True),
             "enable_subtitles": workflow.get("enable_subtitles", False),
             "user_reference_image_url": workflow.get("user_reference_image_url"),
+            "user_selected_tool_id": workflow.get("user_selected_tool_id"),
             "started_at": utc_now_iso(),
             "phase_timestamps": {},
             "hitl_approved": {},
@@ -207,7 +211,7 @@ def get_workflow_runner() -> WorkflowRunner:
     return _workflow_runner
 
 
-async def run_workflow_background(workflow_id: str) -> None:
+async def run_workflow_background(workflow_id: str, video_model: Optional[str] = None) -> None:
     """Run a workflow as a background task.
     
     This is the entry point for triggering workflow execution
@@ -221,7 +225,8 @@ async def run_workflow_background(workflow_id: str) -> None:
     
     try:
         runner = get_workflow_runner()
-        await runner.run_workflow(workflow_id)
+        overrides = {"video_model": video_model} if video_model else None
+        await runner.run_workflow(workflow_id, input_overrides=overrides)
     except Exception as e:
         log_error_msg(logger, f"Background workflow failed: {e}")
         

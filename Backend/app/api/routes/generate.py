@@ -19,10 +19,12 @@ from app.models.workflow import (
     CategoryEnum,
     HITLModeEnum,
     ResolutionEnum,
+    VideoModelOption,
     WorkflowCreateResponse,
     WorkflowInput,
     WorkflowStatus,
 )
+from app.models.video import VideoModel
 from app.services.supabase import get_supabase_client, get_workflow_repository
 from app.utils.helpers import generate_workflow_id, utc_now_iso
 from app.utils.logging import (
@@ -148,6 +150,8 @@ async def create_workflow(
         enable_audio=input_data.enable_audio,
         enable_subtitles=input_data.enable_subtitles,
         reference_image_url=None,
+        tool_id=input_data.tool_id,
+        video_model=input_data.video_model,
     )
 
 
@@ -171,6 +175,8 @@ async def create_workflow_with_image(
     hitl_mode: HITLModeEnum = Form(default=HITLModeEnum.AUTO),
     enable_audio: bool = Form(default=True),
     enable_subtitles: bool = Form(default=False),
+    video_model: VideoModelOption = Form(default=VideoModelOption.VEO_3_1, description="Veo model: veo_3_1 or veo_3_1_fast"),
+    tool_id: Optional[str] = Form(default=None, description="Optional specific tool_id under the selected category"),
     reference_image: Optional[UploadFile] = File(default=None, description="Reference image (max 10MB, jpg/png/webp)"),
 ) -> WorkflowCreateResponse:
     """
@@ -215,6 +221,8 @@ async def create_workflow_with_image(
         enable_subtitles=enable_subtitles,
         reference_image_url=reference_image_url,
         workflow_id=workflow_id,
+        tool_id=tool_id,
+        video_model=video_model,
     )
 
 
@@ -230,6 +238,8 @@ async def _create_workflow_internal(
     enable_subtitles: bool,
     reference_image_url: Optional[str],
     workflow_id: Optional[str] = None,
+    video_model: VideoModelOption = VideoModelOption.VEO_3_1,
+    tool_id: Optional[str] = None,
 ) -> WorkflowCreateResponse:
     """
     Internal workflow creation logic.
@@ -252,8 +262,25 @@ async def _create_workflow_internal(
         "audio": "enabled" if enable_audio else "disabled",
         "subtitles": "enabled" if enable_subtitles else "disabled",
         "reference_image": "provided" if reference_image_url else "none",
+        "video_model": video_model.value,
     })
     
+    # Optional: validate tool_id (must exist and match category if category != auto)
+    if tool_id:
+        from app.tools.registry import get_tool_registry
+        registry = get_tool_registry()
+        tool = await registry.get_by_tool_id(tool_id)
+        if not tool:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tool not found: {tool_id}")
+        if not tool.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tool is inactive: {tool_id}")
+        # If category is fixed (not auto), enforce match
+        if category != CategoryEnum.AUTO and tool.category != category.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tool '{tool_id}' does not belong to category '{category.value}'",
+            )
+
     workflow_data = {
         "id": workflow_id,
         "status": WorkflowStatus.PENDING.value,
@@ -266,6 +293,7 @@ async def _create_workflow_internal(
         "enable_audio": enable_audio,
         "enable_subtitles": enable_subtitles,
         "user_reference_image_url": reference_image_url,
+        "user_selected_tool_id": tool_id,
         "created_at": utc_now_iso(),
         "updated_at": utc_now_iso(),
     }
@@ -284,7 +312,11 @@ async def _create_workflow_internal(
         
         # Trigger background workflow execution
         from app.services.workflow_runner import run_workflow_background
-        background_tasks.add_task(run_workflow_background, workflow_id)
+        # Map user-friendly option to actual Veo model string (see Documentations/veo_doc.md)
+        selected_model = (
+            VideoModel.VEO_3_1.value if video_model == VideoModelOption.VEO_3_1 else VideoModel.VEO_3_1_FAST.value
+        )
+        background_tasks.add_task(run_workflow_background, workflow_id, video_model=selected_model)
         log_workflow_event(logger, workflow_id, "Background execution scheduled")
         
     except ValueError as e:

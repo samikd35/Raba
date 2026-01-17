@@ -97,6 +97,12 @@ In Supabase SQL Editor, run these migrations in order:
 
 -- 5. Create usage_metrics table (for monitoring)
 -- migrations/usage_metrics.sql
+
+-- 6. Update duration limit to 60 seconds (if upgrading from 25s)
+-- migrations/update_duration_limit.sql
+
+-- 7. Add user-selected tool column (optional feature)
+-- migrations/007_add_user_selected_tool.sql
 ```
 
 ### Storage Buckets

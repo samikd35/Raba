@@ -143,6 +143,7 @@ if __name__ == "__main__":
     import uvicorn
     
     logger.info("Starting RABA Backend with uvicorn...")
+    # Use import string format to enable reload functionality
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

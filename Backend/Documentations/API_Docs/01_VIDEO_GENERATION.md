@@ -36,6 +36,7 @@ Create a new video generation workflow using JSON body.
   "aspect_ratio": "9:16",
   "resolution": "1080p",
   "category": "auto",
+  "tool_id": "optional tool id under category",
   "hitl_mode": "auto",
   "enable_audio": true,
   "enable_subtitles": false
@@ -47,10 +48,11 @@ Create a new video generation workflow using JSON body.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `topic` | string | ✅ | - | Video topic/subject (3-500 characters) |
-| `duration_seconds` | integer | ❌ | `18` | Video duration (8-25 seconds) |
+| `duration_seconds` | integer | ❌ | `18` | Video duration (8-60 seconds) |
 | `aspect_ratio` | enum | ❌ | `"9:16"` | Video aspect ratio (`"9:16"`, `"16:9"`) |
 | `resolution` | enum | ❌ | `"1080p"` | Video resolution (`"720p"`, `"1080p"`) |
-| `category` | enum | ❌ | `"auto"` | Visual style category |
+| `category` | enum | ❌ | `"auto"` | Visual style category (if not `auto`, agent will only consider tools in this category) |
+| `tool_id` | string | ❌ | `null` | Optional specific tool_id. If provided, agent must use this tool. If both `category` and `tool_id` are provided, tool must belong to the category. |
 | `hitl_mode` | enum | ❌ | `"auto"` | Human-in-the-loop mode (`"auto"`, `"manual"`) |
 | `enable_audio` | boolean | ❌ | `true` | Generate audio with video |
 | `enable_subtitles` | boolean | ❌ | `false` | Generate subtitles |
@@ -115,10 +117,11 @@ Create a workflow with an optional reference image upload.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `topic` | string | ✅ | Video topic (3-500 chars) |
-| `duration_seconds` | integer | ❌ | Duration 8-25s (default: 18) |
+| `duration_seconds` | integer | ❌ | Duration 8-60s (default: 18) |
 | `aspect_ratio` | enum | ❌ | Aspect ratio (default: `9:16`) |
 | `resolution` | enum | ❌ | Resolution (default: `1080p`) |
-| `category` | enum | ❌ | Category (default: `auto`) |
+| `category` | enum | ❌ | Category (default: `auto`); if not `auto`, agent will only consider tools in this category |
+| `tool_id` | string | ❌ | Optional specific tool_id (must belong to `category` when category != `auto`) |
 | `hitl_mode` | enum | ❌ | HITL mode (default: `auto`) |
 | `enable_audio` | boolean | ❌ | Generate audio (default: `true`) |
 | `enable_subtitles` | boolean | ❌ | Generate subtitles (default: `false`) |

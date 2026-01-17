@@ -18,7 +18,7 @@ Reference:
 
 import asyncio
 import time
-from typing import Optional
+from typing import Optional, Callable, Awaitable
 
 from google import genai
 from google.genai import types
@@ -60,6 +60,16 @@ class VideoGenerationFailedError(VeoServiceError):
     pass
 
 
+class VideoGenerationTransientError(VideoGenerationFailedError):
+    """Raised when a transient/platform error occurs (safe to retry)."""
+    pass
+
+
+class VideoExtensionNotSupportedError(VideoGenerationFailedError):
+    """Raised when the SDK/API does not support the 'video' extension parameter."""
+    pass
+
+
 class VeoService:
     """Service for Veo 3.1 video generation.
     
@@ -92,7 +102,7 @@ class VeoService:
         self,
         prompt: str,
         config: VideoGenerationConfig,
-        reference_images: Optional[list[bytes]] = None,
+        reference_images: Optional[list] = None,
     ) -> tuple[object, int]:
         """Generate initial video segment with optional reference images.
         
@@ -127,16 +137,29 @@ class VeoService:
             generation_config = None
         
         # Prepare the first reference image as the starting frame if provided
-        # Use types.Image with imageBytes (raw bytes, not base64)
+        # Use types.Image with correct mimeType (raw bytes, not base64)
         first_frame_image = None
         if reference_images and len(reference_images) > 0:
             try:
-                # types.Image expects raw bytes, not base64
-                first_frame_image = types.Image(
-                    imageBytes=reference_images[0],
-                    mimeType="image/png"
-                )
-                logger.info("Using first generated image as starting frame (types.Image)")
+                raw = reference_images[0]
+                img_bytes: Optional[bytes] = None
+                mime_type: str = "image/png"
+                if isinstance(raw, dict):
+                    img_bytes = raw.get("bytes")
+                    mime_type = (raw.get("mime_type") or "image/png").strip()
+                elif isinstance(raw, tuple) and len(raw) == 2:
+                    img_bytes, mime_type = raw  # type: ignore[assignment]
+                elif isinstance(raw, (bytes, bytearray)):
+                    img_bytes = bytes(raw)
+                
+                if img_bytes:
+                    first_frame_image = types.Image(
+                        imageBytes=img_bytes,
+                        mimeType=mime_type
+                    )
+                    logger.info(f"Using first reference image as starting frame (mime={mime_type})")
+                else:
+                    logger.warning("Reference image missing bytes; proceeding without image")
             except Exception as e:
                 logger.warning(f"Failed to prepare reference image: {e}, proceeding without image")
                 first_frame_image = None
@@ -333,15 +356,29 @@ class VeoService:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Video extension failed: {error_msg}")
-            
-            # Check if this is the known SDK limitation
-            if "video parameter is not supported" in error_msg.lower():
+
+            # Classify known unsupported behavior by message
+            lower = error_msg.lower()
+            if "video parameter is not supported" in lower or "unimplemented" in lower or "not supported" in lower:
                 logger.warning(
                     "VIDEO EXTENSION NOT SUPPORTED: The current google-genai SDK version "
                     "does not support video extension. Videos will be limited to 8 seconds. "
                     "Update SDK when video extension support is added."
                 )
-            
+                raise VideoExtensionNotSupportedError(f"Video extension not supported: {error_msg}")
+
+            # Treat clear internal/transient/platform faults as transient
+            # Best-effort classification: parse "{'code': 13, 'message': '...'}" pattern
+            try:
+                import re
+                m = re.search(r"code\s*[:=]\s*(\d+)", lower)
+                code = int(m.group(1)) if m else None
+            except Exception:
+                code = None
+
+            if code in (13, 14, 4, 8, 429) or "internal server issue" in lower or "temporarily unavailable" in lower or "resource_exhausted" in lower or "quota" in lower:
+                raise VideoGenerationTransientError(f"Video extension transient error: {error_msg}")
+
             raise VideoGenerationFailedError(f"Video extension failed: {error_msg}")
     
     async def generate_multi_segment_video(
@@ -349,7 +386,8 @@ class VeoService:
         initial_prompt: str,
         extension_prompts: list[str],
         config: VideoGenerationConfig,
-        reference_images: Optional[list[bytes]] = None,
+        reference_images: Optional[list] = None,
+        on_progress: Optional[Callable[[object, list[VideoSegment], float], Awaitable[None]]] = None,
     ) -> tuple[object, list[VideoSegment], int]:
         """Generate a seamless multi-segment video.
         
@@ -374,7 +412,8 @@ class VeoService:
         
         logger.info(f"Starting multi-segment video generation: 1 initial + {len(extension_prompts)} extensions")
         
-        current_video, gen_time = await self.generate_video(
+        # Use retry + fallback for the initial generation to handle transient errors
+        current_video, gen_time, _retry_count = await self.generate_video_with_retry(
             prompt=initial_prompt,
             config=config,
             reference_images=reference_images,
@@ -392,25 +431,86 @@ class VeoService:
         )
         segments.append(initial_segment)
         current_duration = 8.0
-        
+
         logger.info(f"Initial segment generated: {current_duration}s total")
+
+        # Persist progress after initial segment
+        if on_progress:
+            try:
+                await on_progress(current_video, list(segments), current_duration)
+            except Exception as e:
+                logger.warning(f"Progress callback failed after initial segment: {e}")
         
         for i, ext_prompt in enumerate(extension_prompts):
             logger.info(f"Generating extension {i + 1}/{len(extension_prompts)}")
             
-            try:
-                # Try to extend - video parameter may not be supported in all SDK versions
-                video_to_extend = current_video.video if hasattr(current_video, 'video') else current_video
-                current_video, gen_time = await self.extend_video(
-                    video_object=video_to_extend,
-                    prompt=ext_prompt,
-                    config=config,
-                )
-            except Exception as ext_error:
-                # Video extension not supported - use initial segment only
-                logger.warning(f"Video extension not supported in current SDK: {ext_error}")
-                logger.info("Continuing with initial segment only (8s video)")
-                break  # Exit extension loop, use what we have
+            # Try to extend - video parameter may not be supported in all SDK versions
+            video_to_extend = current_video.video if hasattr(current_video, 'video') else current_video
+
+            # Robust retry with exponential backoff + jitter for transient faults
+            max_attempts = max(3, config.max_retries)
+            attempt = 0
+            while True:
+                try:
+                    current_video, gen_time = await self.extend_video(
+                        video_object=video_to_extend,
+                        prompt=ext_prompt,
+                        config=config,
+                    )
+                    break  # success
+                except VideoExtensionNotSupportedError as e:
+                    logger.warning(f"Video extension not supported by SDK/API: {e}")
+                    logger.info("Continuing with initial segment only (8s video)")
+                    # Exit extension loop and keep what we have so far
+                    total_generation_time_ms = int((time.time() - total_start_time) * 1000)
+                    if on_progress:
+                        try:
+                            await on_progress(current_video, list(segments), current_duration)
+                        except Exception as pe:
+                            logger.warning(f"Progress callback failed before unsupported return: {pe}")
+                    logger.info(
+                        f"Multi-segment halted: SDK lacks extension support. "
+                        f"Returning {len(segments)} segment(s), {current_duration}s total."
+                    )
+                    return current_video, segments, total_generation_time_ms
+                except VideoGenerationTransientError as e:
+                    attempt += 1
+                    if attempt >= max_attempts:
+                        logger.error(
+                            f"Extension transient error after {attempt} attempts: {e}. "
+                            "Returning partial video."
+                        )
+                        total_generation_time_ms = int((time.time() - total_start_time) * 1000)
+                        if on_progress:
+                            try:
+                                await on_progress(current_video, list(segments), current_duration)
+                            except Exception as pe:
+                                logger.warning(f"Progress callback failed before partial return: {pe}")
+                        return current_video, segments, total_generation_time_ms
+                    backoff = min(45, (2 ** (attempt - 1)) * 5)
+                    jitter = min(5, attempt)  # small jitter
+                    wait_s = backoff + (jitter * 0.2)
+                    # If rate limited, ensure a longer minimum wait
+                    low = str(e).lower()
+                    if "resource_exhausted" in low or "429" in low or "quota" in low:
+                        wait_s = max(wait_s, 20.0)
+                    logger.warning(
+                        f"Extension attempt {attempt} failed transiently. Retrying in {wait_s:.1f}s..."
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
+                except VideoGenerationFailedError as e:
+                    # Permanent failure on this extension -> stop and return what we have
+                    logger.error(
+                        f"Extension failed permanently: {e}. Returning partial video at {current_duration}s."
+                    )
+                    total_generation_time_ms = int((time.time() - total_start_time) * 1000)
+                    if on_progress:
+                        try:
+                            await on_progress(current_video, list(segments), current_duration)
+                        except Exception as pe:
+                            logger.warning(f"Progress callback failed before permanent return: {pe}")
+                    return current_video, segments, total_generation_time_ms
             
             extension_duration = 7.0
             extension_segment = VideoSegment(
@@ -427,6 +527,13 @@ class VeoService:
             current_duration += extension_duration
             
             logger.info(f"Extension {i + 1} complete: {current_duration}s total (seamless)")
+
+            # Persist progress after each extension
+            if on_progress:
+                try:
+                    await on_progress(current_video, list(segments), current_duration)
+                except Exception as e:
+                    logger.warning(f"Progress callback failed after extension {i + 1}: {e}")
         
         total_generation_time_ms = int((time.time() - total_start_time) * 1000)
         
@@ -555,9 +662,24 @@ class VeoService:
             )
         
         if hasattr(operation, 'error') and operation.error:
-            raise VideoGenerationFailedError(
-                f"Video generation failed: {operation.error}"
-            )
+            # Classify error
+            err = operation.error
+            err_str = str(err)
+            code = None
+            try:
+                # Try structured access first
+                code = getattr(err, 'code', None)
+                if code is None and isinstance(err, dict):
+                    code = err.get('code')
+            except Exception:
+                code = None
+
+            lower = err_str.lower()
+            if code in (13, 14, 4, 8, 429) or "internal server issue" in lower or "temporarily unavailable" in lower or "resource_exhausted" in lower or "quota" in lower:
+                raise VideoGenerationTransientError(f"Video generation failed: {err_str}")
+            if "video parameter is not supported" in lower or "unimplemented" in lower or "not supported" in lower:
+                raise VideoExtensionNotSupportedError(f"Video generation failed: {err_str}")
+            raise VideoGenerationFailedError(f"Video generation failed: {err_str}")
         
         # Try 'result' first (as per latest SDK examples), then fall back to 'response'
         result = None
@@ -622,15 +744,19 @@ class VeoService:
                 logger.warning(f"Attempt {attempt + 1} failed: {e}")
             
             if attempt < config.max_retries - 1:
-                wait_time = 2 ** attempt * 5
-                logger.info(f"Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
+                # Exponential backoff with minimums for rate limits
+                base_wait = 2 ** attempt * 5
+                err_str = str(last_error).lower() if last_error else ""
+                if "resource_exhausted" in err_str or "429" in err_str or "quota" in err_str:
+                    base_wait = max(base_wait, 20)
+                logger.info(f"Retrying in {base_wait}s...")
+                await asyncio.sleep(base_wait)
                 
                 if attempt == config.max_retries - 2:
                     if config.model == VideoModel.VEO_3_1:
                         logger.info("Falling back to Veo 3.1 Fast")
                         config.model = VideoModel.VEO_3_1_FAST
-                    
+                
                     if config.resolution == VideoResolution.RES_1080P:
                         logger.info("Falling back to 720p resolution")
                         config.resolution = VideoResolution.RES_720P

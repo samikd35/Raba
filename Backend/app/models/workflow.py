@@ -51,6 +51,14 @@ class ResolutionEnum(str, Enum):
     HD = "720p"
     FULL_HD = "1080p"
 
+class VideoModelOption(str, Enum):
+    """User-selectable Veo model option.
+    
+    Reference: Documentations/veo_doc.md - Model Versions
+    """
+    VEO_3_1 = "veo_3_1"          # Maps to veo-3.1-generate-preview
+    VEO_3_1_FAST = "veo_3_1_fast"  # Maps to veo-3.1-fast-generate-preview
+
 
 class WorkflowInput(BaseModel):
     """Input model for creating a new video generation workflow."""
@@ -98,6 +106,20 @@ class WorkflowInput(BaseModel):
     enable_subtitles: bool = Field(
         default=False,
         description="Generate subtitles"
+    )
+    
+    # Optional model selection between Veo 3.1 and Veo 3.1 Fast
+    video_model: VideoModelOption = Field(
+        default=VideoModelOption.VEO_3_1,
+        description="Veo model variant: veo_3_1 (default) or veo_3_1_fast",
+        examples=["veo_3_1", "veo_3_1_fast"],
+    )
+    
+    # Optional specific tool selection under a category
+    tool_id: Optional[str] = Field(
+        default=None,
+        description="Optional tool_id to force a specific tool from the repository. If provided, agents must use this tool. If only category is provided (not 'auto'), agents will select among tools in that category.",
+        examples=["surreal_impossible_sims", "anime_concept_combat"]
     )
     
     @field_validator("topic")

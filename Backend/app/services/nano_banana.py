@@ -25,6 +25,7 @@ from typing import Optional
 from google import genai
 from google.genai import types
 from PIL import Image
+import math
 
 from app.config import get_settings
 from app.models.image import (
@@ -128,16 +129,42 @@ class NanoBananaService:
         # Add text prompt directly (SDK accepts strings in contents list)
         contents.append(prompt)
         
-        # Build generation config following documentation pattern
-        # Note: image_config is NOT supported in types.GenerateContentConfig in current SDK
-        # Only use response_modalities for basic image generation
+        # Build generation config with image_config for aspect ratio and resolution
+        # Reference: nano_prompt_guide.md:4415-4550
         try:
+            # Map aspect ratio and resolution to API format
+            aspect_ratio_str = config.aspect_ratio.value  # Already in "9:16" format
+            resolution_str = config.resolution.value  # Already in "1K", "2K", "4K" format
+            
+            # Create ImageConfig for aspect ratio and resolution
+            # Note: For gemini-2.5-flash-image, only aspect_ratio is supported
+            # For gemini-3-pro-image-preview, both aspect_ratio and image_size are supported
+            if model == NANO_BANANA_PRO:
+                image_config = types.ImageConfig(
+                    aspect_ratio=aspect_ratio_str,
+                    image_size=resolution_str,
+                )
+            else:
+                # Nano Banana Flash only supports aspect_ratio
+                image_config = types.ImageConfig(
+                    aspect_ratio=aspect_ratio_str,
+                )
+            
             generation_config = types.GenerateContentConfig(
                 response_modalities=["TEXT", "IMAGE"],
+                image_config=image_config,
             )
+            logger.info(f"Using image_config: aspect_ratio={aspect_ratio_str}, image_size={resolution_str if model == NANO_BANANA_PRO else 'N/A'}")
         except Exception as e:
-            logger.debug(f"GenerateContentConfig creation failed, using dict: {e}")
-            generation_config = {"response_modalities": ["TEXT", "IMAGE"]}
+            logger.warning(f"ImageConfig not supported in SDK, using fallback: {e}")
+            # Fallback: try without image_config
+            try:
+                generation_config = types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                )
+            except Exception as e2:
+                logger.debug(f"GenerateContentConfig creation failed, using dict: {e2}")
+                generation_config = {"response_modalities": ["TEXT", "IMAGE"]}
         
         try:
             response = await asyncio.to_thread(
@@ -160,6 +187,18 @@ class NanoBananaService:
             
             if image_bytes is None:
                 raise ValueError("No image generated in response")
+            
+            # Post-process to enforce aspect ratio/resolution as fallback
+            # This should rarely be needed if API respects image_config, but kept as safety net
+            try:
+                image_bytes = self._enforce_aspect_ratio(
+                    image_bytes,
+                    target_ar=config.aspect_ratio.value,
+                    target_res=config.resolution.value,
+                )
+                logger.debug("Applied post-processing aspect ratio enforcement (fallback)")
+            except Exception as ar_e:
+                logger.warning(f"Aspect ratio enforcement failed, returning raw image: {ar_e}")
             
             generation_time = int((time.time() - start_time) * 1000)
             logger.info(f"Image generation completed in {generation_time}ms")
@@ -261,23 +300,49 @@ class NanoBananaService:
         for i, prompt in enumerate(prompts):
             logger.info(f"Generating image {i + 1}/{len(prompts)}")
             
+            # Build reference image list for current generation
+            current_references = []
+            
+            # Add research images (style guide) - up to 2 for first image
+            if research_reference_images and i == 0:
+                current_references.extend(research_reference_images[:2])
+                logger.debug(f"Added {len(research_reference_images[:2])} research images as style reference")
+            
+            # Add user reference (if first image)
+            if i == 0 and user_reference_image:
+                current_references.append(user_reference_image)
+                logger.debug("Added user reference image for style consistency")
+            
+            # Add ALL previously generated images (up to 5 for Nano Banana Pro)
+            # This ensures maximum consistency across the sequence
+            if i > 0:
+                # Use last 5 generated images as references (Nano Banana Pro supports up to 14 total)
+                previous_generated = [img for img in reference_images if img not in (research_reference_images or []) and img != user_reference_image]
+                if previous_generated:
+                    # Use up to 5 most recent generated images
+                    recent_images = previous_generated[-5:] if len(previous_generated) > 5 else previous_generated
+                    current_references.extend(recent_images)
+                    logger.debug(f"Added {len(recent_images)} previous generated images as references")
+            
             consistency_prompt = self._build_consistency_prompt(
                 prompt=prompt,
                 scene_number=i + 1,
                 total_scenes=len(prompts),
                 style_reference=style_reference,
                 is_first_image=(i == 0),
+                previous_image_present=(i > 0),
             )
             
             image_bytes, text_response, retry_count = await self.generate_image_with_retry(
                 prompt=consistency_prompt,
                 config=config,
                 style_reference=style_reference,
-                reference_images=reference_images[-3:] if reference_images else None,
+                reference_images=current_references if current_references else None,
             )
             
             results.append((image_bytes, text_response, retry_count))
             
+            # Add generated image to reference pool for next iterations
             reference_images.append(image_bytes)
             
             if i == 0 and not style_reference.style_description:
@@ -287,9 +352,70 @@ class NanoBananaService:
                     "Keep character appearances, proportions, and clothing consistent."
                 )
             
-            logger.info(f"Image {i + 1} generated, added to reference pool")
+            logger.info(f"Image {i + 1} generated, added to reference pool (total references: {len(reference_images)})")
         
         return results
+
+    def _enforce_aspect_ratio(self, image_bytes: bytes, target_ar: str, target_res: str) -> bytes:
+        """Center-crop and resize image to match target aspect ratio and resolution.
+        
+        Args:
+            image_bytes: Source image bytes
+            target_ar: Aspect ratio string like "9:16", "16:9", "1:1"
+            target_res: Resolution label: "1K" (1024), "2K" (2048), "4K" (4096)
+        Returns:
+            PNG bytes of the adjusted image
+        """
+        # Map resolution label to max dimension in pixels
+        max_dim_map = {"1K": 1024, "2K": 2048, "4K": 4096}
+        max_dim = max_dim_map.get(target_res, 2048)
+        
+        # Parse aspect ratio
+        try:
+            w_s, h_s = target_ar.split(":")
+            ar_w = int(w_s)
+            ar_h = int(h_s)
+        except Exception:
+            ar_w, ar_h = 9, 16
+        target_ratio = ar_w / ar_h
+        
+        # Determine target dimensions (long side = max_dim)
+        if target_ratio >= 1.0:
+            # Landscape
+            tgt_w = max_dim
+            tgt_h = int(round(tgt_w / target_ratio))
+        else:
+            # Portrait / square where ratio < 1 means height dominates
+            tgt_h = max_dim
+            tgt_w = int(round(tgt_h * target_ratio))
+        
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            src_w, src_h = img.size
+            src_ratio = src_w / src_h if src_h else target_ratio
+            
+            # Compute crop region to match aspect ratio, centered
+            if abs(src_ratio - target_ratio) > 1e-3:
+                if src_ratio > target_ratio:
+                    # Too wide -> reduce width
+                    new_w = int(round(src_h * target_ratio))
+                    left = (src_w - new_w) // 2
+                    box = (left, 0, left + new_w, src_h)
+                else:
+                    # Too tall -> reduce height
+                    new_h = int(round(src_w / target_ratio))
+                    top = (src_h - new_h) // 2
+                    box = (0, top, src_w, top + new_h)
+                img = img.crop(box)
+            
+            # Resize to target dimensions with high-quality filter
+            img = img.resize((max(tgt_w, 1), max(tgt_h, 1)), Image.LANCZOS)
+            
+            # Ensure RGB/PNG output
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            out = io.BytesIO()
+            img.save(out, format="PNG")
+            return out.getvalue()
     
     def _build_consistency_prompt(
         self,
@@ -298,8 +424,9 @@ class NanoBananaService:
         total_scenes: int,
         style_reference: StyleReference,
         is_first_image: bool,
+        previous_image_present: bool = False,
     ) -> str:
-        """Build prompt with style consistency instructions.
+        """Build prompt with STRONG style consistency instructions.
         
         Args:
             prompt: Original scene prompt
@@ -307,33 +434,43 @@ class NanoBananaService:
             total_scenes: Total number of scenes
             style_reference: Style reference with consistency info
             is_first_image: Whether this is the first image
+            previous_image_present: Whether previous generated images exist as references
             
         Returns:
             Enhanced prompt with consistency instructions
         """
         parts = []
         
-        if not is_first_image:
+        if not is_first_image and previous_image_present:
             parts.append(
-                "CRITICAL: This image MUST maintain EXACT visual consistency with the reference image(s). "
-                "Match the following precisely:\n"
-                "- Art style and rendering technique\n"
-                "- Color palette and color grading\n"
-                "- Lighting style and direction\n"
-                "- Character appearances (if any)\n"
-                "- Overall mood and atmosphere\n\n"
+                "CRITICAL CONSISTENCY REQUIREMENTS - THIS IMAGE MUST MATCH THE REFERENCE IMAGE(S) EXACTLY:\n\n"
+                "1. ART STYLE: Use the EXACT same rendering technique, line quality, brush strokes, "
+                "and artistic treatment as the reference image(s).\n"
+                "2. COLOR PALETTE: Match colors precisely - same hues, saturation levels, color grading, "
+                "and overall color temperature.\n"
+                "3. LIGHTING: Maintain identical lighting direction, intensity, shadow style, highlights, "
+                "and overall illumination approach.\n"
+                "4. CHARACTERS: If characters appear, they MUST look identical - same appearance, "
+                "facial features, clothing, proportions, and physical characteristics.\n"
+                "5. MOOD & ATMOSPHERE: Preserve the exact same emotional tone, visual mood, and "
+                "atmospheric quality.\n"
+                "6. COMPOSITION STYLE: Use similar framing, camera angle, perspective, and visual "
+                "composition approach.\n"
+                "7. TEXTURE & DETAIL: Match the level of detail, texture rendering, and surface quality.\n\n"
+                "DO NOT deviate from the reference style. This is part of a video sequence and must be "
+                "visually cohesive. The reference image(s) show the established visual style - follow it exactly.\n\n"
             )
         
         parts.append(f"[Scene {scene_number} of {total_scenes}]\n\n")
         
         if style_reference.character_descriptions:
-            parts.append("CHARACTER CONSISTENCY:\n")
+            parts.append("CHARACTER CONSISTENCY - MAINTAIN THESE EXACTLY:\n")
             for char_desc in style_reference.character_descriptions:
                 parts.append(f"- {char_desc}\n")
             parts.append("\n")
         
         if style_reference.color_palette:
-            parts.append(f"COLOR PALETTE: {', '.join(style_reference.color_palette)}\n\n")
+            parts.append(f"COLOR PALETTE (MUST MATCH): {', '.join(style_reference.color_palette)}\n\n")
         
         parts.append(prompt)
         

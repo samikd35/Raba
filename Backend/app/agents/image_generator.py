@@ -1,6 +1,6 @@
 """RABA Image Generator Agent.
 
-Generates 1-5 reference images using Nano Banana Pro/Flash for video generation.
+Generates up to 3 reference images using Nano Banana Pro/Flash for video generation.
 Maintains visual consistency across all images in a workflow.
 
 Key Features:
@@ -37,8 +37,9 @@ from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-MIN_GENERATED_IMAGES = 3  # Always generate at least 3 images
-MAX_GENERATED_IMAGES = 6  # Maximum 6 images for video
+# Limit generated images to align with Veo reference cap
+MIN_GENERATED_IMAGES = 1  # Always generate at least 1 image
+MAX_GENERATED_IMAGES = 3  # Never generate more than 3 images
 VEO_MAX_REFERENCE_IMAGES = 3  # Veo 3.1 accepts max 3 reference images
 
 TOOL_VISUAL_VOCABULARY = {
@@ -150,36 +151,46 @@ def calculate_images_to_generate(
 ) -> int:
     """Calculate how many images to generate with Nano Banana.
     
-    IMPORTANT: Always generate 3-6 images regardless of research images.
-    Research images are ONLY used as style reference for Nano Banana,
-    NOT as substitutes for generated images.
+    IMPORTANT: User reference and research images are used as STYLE REFERENCES
+    during image generation, NOT as final reference images for Veo. We should
+    ALWAYS generate up to 3 images regardless of user/research images.
+    
+    All generated images (up to 3) are then used as references for Veo video generation.
+    User reference and research images help maintain style consistency but don't
+    reduce the number of images we generate.
     
     Logic:
-    - Generate at least MIN_GENERATED_IMAGES (3)
-    - Generate up to MAX_GENERATED_IMAGES (6) based on scene count
-    - Research images do NOT reduce the count
+    - Always generate up to MAX_GENERATED_IMAGES (3) images
+    - Respect scene_count limit (don't generate more images than scenes)
+    - Generate at least MIN_GENERATED_IMAGES (1) image
+    - User reference and research images are used as style references, not counted
     
     Args:
         scene_count: Number of scenes in the script
-        user_has_reference: Whether user provided a reference image (for logging only)
-        research_image_count: Number of images from research (for logging only)
+        user_has_reference: Whether user provided a reference image (used for style, not counted)
+        research_image_count: Number of images from research (used for style, not counted)
         
     Returns:
-        Number of images to generate (3-6)
+        Number of images to generate (1-3)
     """
-    # Base count = min of scene count and max allowed
-    base_count = min(scene_count, MAX_GENERATED_IMAGES)
+    # Always generate up to 3 images, regardless of user/research images
+    # These are used as style references during generation, not final Veo references
+    to_generate = MAX_GENERATED_IMAGES
     
-    # Ensure we always generate at least MIN_GENERATED_IMAGES
-    result = max(MIN_GENERATED_IMAGES, base_count)
+    # Respect scene_count limit (don't generate more images than scenes)
+    if scene_count > 0:
+        to_generate = min(to_generate, scene_count)
+    
+    # Ensure at least 1 image is generated
+    to_generate = max(MIN_GENERATED_IMAGES, to_generate)
     
     logger.info(
-        f"Image count calculation: scenes={scene_count}, "
-        f"user_ref={user_has_reference}, research={research_image_count}, "
-        f"generating={result}"
+        f"Image count calculation: scenes={scene_count}, user_ref={user_has_reference} "
+        f"(style reference only), research={research_image_count} (style reference only), "
+        f"generating={to_generate} images"
     )
     
-    return result
+    return to_generate
 
 
 def build_image_prompt(
@@ -248,7 +259,7 @@ def build_image_prompt(
 class ImageGeneratorAgent:
     """Agent for generating reference images with style consistency.
     
-    Generates 1-5 images based on script scenes, maintaining visual
+    Generates up to 3 images based on script scenes, maintaining visual
     consistency across all images for a cohesive video.
     """
     
@@ -435,26 +446,59 @@ class ImageGeneratorAgent:
         tool_category: str,
         scenes: list[dict],
     ) -> StyleReference:
-        """Build style reference for consistency."""
+        """Build comprehensive style reference for consistency.
+        
+        Extracts character descriptions, builds detailed style instructions,
+        and creates color palette hints based on tool category.
+        """
         vocab = TOOL_VISUAL_VOCABULARY.get(tool_category, TOOL_VISUAL_VOCABULARY["surreal_realism"])
         
+        # Extract character descriptions more thoroughly
         character_descriptions = []
         for scene in scenes:
             desc = scene.get("description", "")
-            if any(word in desc.lower() for word in ["character", "person", "player", "man", "woman"]):
-                character_descriptions.append(desc[:200])
+            dialogue = scene.get("dialogue", "")
+            
+            # Look for character mentions with broader keywords
+            char_keywords = [
+                "character", "person", "player", "man", "woman", "child", "figure",
+                "protagonist", "character", "individual", "subject", "moses", "pharaoh"
+            ]
+            if any(keyword in desc.lower() for keyword in char_keywords):
+                # Extract longer, more detailed character description
+                char_desc = desc[:300]  # Longer description for better consistency
+                if dialogue:
+                    char_desc += f" Dialogue style: {dialogue[:100]}"
+                character_descriptions.append(char_desc)
         
+        # Build comprehensive style description with detailed requirements
         style_description = (
-            f"Visual style: {', '.join(vocab['style_keywords'][:3])}. "
-            f"Mood: {', '.join(vocab['mood_keywords'][:2])}. "
-            f"Lighting: {', '.join(vocab['lighting'][:2])}. "
-            "Maintain consistent color grading, artistic treatment, and character appearances."
+            f"VISUAL STYLE REQUIREMENTS (MUST BE CONSISTENT ACROSS ALL IMAGES):\n"
+            f"- Art Style: {', '.join(vocab['style_keywords'][:4])}\n"
+            f"- Mood & Atmosphere: {', '.join(vocab['mood_keywords'][:2])}\n"
+            f"- Lighting Style: {', '.join(vocab['lighting'][:2])}\n"
+            f"- Camera Approach: {', '.join(vocab['camera_styles'][:2])}\n\n"
+            f"CRITICAL: All images in this sequence must maintain EXACT visual consistency. "
+            f"Match color grading, artistic treatment, character appearances (if any), "
+            f"and overall visual style precisely across all images."
         )
+        
+        # Extract color palette hints based on tool category
+        color_palette = []
+        if "surreal" in tool_category:
+            color_palette = ["vibrant blues", "golden yellows", "ethereal whites", "deep purples"]
+        elif "anime" in tool_category:
+            color_palette = ["high contrast", "saturated colors", "dramatic shadows", "vibrant hues"]
+        elif "3d" in tool_category or "stylized" in tool_category:
+            color_palette = ["clean pastels", "soft gradients", "muted tones", "professional lighting"]
+        else:
+            # Default palette hints
+            color_palette = ["consistent color grading", "harmonious palette", "matching saturation"]
         
         return StyleReference(
             style_description=style_description,
-            character_descriptions=character_descriptions[:3],
-            color_palette=[],
+            character_descriptions=character_descriptions[:3],  # Up to 3 characters
+            color_palette=color_palette,
         )
     
     async def _upload_to_storage(self, image_bytes: bytes, storage_path: str) -> str:

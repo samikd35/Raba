@@ -58,6 +58,7 @@ async function postFormData<T>(url: string, formData: FormData): Promise<T> {
 export const api = {
     get: <T>(url: string) => fetchJson<T>(url),
     post: <T>(url: string, body: any) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) }),
+    put:  <T>(url: string, body: any) => fetchJson<T>(url, { method: 'PUT', body: JSON.stringify(body) }),
     delete: <T>(url: string) => fetchJson<T>(url, { method: 'DELETE' }),
     postMultipart: <T>(url: string, formData: FormData) => postFormData<T>(url, formData),
 };

@@ -78,8 +78,8 @@ RABA is a production-grade, multi-agent system that automatically generates 18-2
         └───────────┬───────────┘
                     ▼
          ┌─────────────────────┐
-         │   SUPABASE & S3     │
-         │ (Storage + Metadata)│
+         │  SUPABASE STORAGE   │
+         │ (Media + Metadata)  │
          └─────────────────────┘
 ```
 
@@ -110,30 +110,34 @@ RABA is a production-grade, multi-agent system that automatically generates 18-2
 ```
 
 **Key Endpoints**:
-- `POST /api/v1/generate` - Initiate video generation
-- `GET /api/v1/jobs/{job_id}` - Poll job status
-- `GET /api/v1/jobs/{job_id}/result` - Retrieve final video
-- `POST /api/v1/tools/register` - Register new tool (admin)
-- `GET /api/v1/tools` - List available tools (with caching)
+- `POST /api/v1/generate` - Initiate workflow (JSON)
+- `POST /api/v1/generate/with-image` - Initiate with reference image (multipart)
+- `GET /api/v1/workflows/{id}` - Get workflow status/output
+- `GET /api/v1/workflows` - List workflows (paginated)
+- `POST /api/v1/workflows/{id}/feedback` - Submit HITL approval/feedback
+- `GET /api/v1/tools` - List tools (Redis-cached)
+- `POST /api/v1/tools` - Create tool (AI-enhanced)
+- `POST /api/v1/tools/preview` - Preview enhancement (no persist)
+- `GET /health` - Health (includes Redis)
 
-**Dependencies**: FastAPI, Uvicorn, Pydantic, python-jose, supabase-py (async)
+**Dependencies**: FastAPI, Uvicorn, Pydantic, SlowAPI (rate limiting), supabase-py, redis-py
 
 ---
 
-### 2.2 LangGraph Orchestrator (`langgraph/orchestrator.py`)
+### 2.2 LangGraph Orchestrator (`app/graph/...`)
 
 **Purpose**: Graph-based workflow management with state machines
 
 ```
 Core Components:
-├── StateGraph Definition
-│   ├── State Schema (shared across all agents)
-│   ├── Node Functions (agents)
-│   └── Edge Functions (conditional routing)
-├── Checkpointer Configuration
-│   └── Supabase-backed state persistence
-└── Compiled Graph Executor
-    └── invoke() with context tracking
+├── StateGraph Definition (workflow.py)
+│   ├── State Schema (state.py)
+│   ├── Node Functions (nodes.py)
+│   └── Conditional routing (HITL-aware)
+├── Persistence Model
+│   └── No global checkpointer; each node persists outputs to Supabase
+└── Execution
+    └── Compiled graph (graph.compile().ainvoke(state)) with manual HITL pauses
 ```
 
 **State Schema Structure**:
@@ -152,16 +156,21 @@ class VideoGenerationState(TypedDict):
     cached_research: bool
     
     # Script Generation
-    script: ScriptOutput
-    scene_descriptions: list[SceneDescription]
+    script_output: dict
+    hook: dict
+    scenes: list[dict]
+    call_to_action: dict
     
-    # Image Generation
-    reference_image_url: str
-    reference_image_metadata: dict
+    # Images
+    generated_images: list[str]
+    all_images: list[str]
+    image_metadata: list[dict]
     
-    # Video Generation
+    # Video
+    video_url: str
+    video_output: dict
     final_video_url: str
-    video_metadata: VideoMetadata
+    video_metadata: dict
     
     # Tracking
     job_id: str
@@ -236,13 +245,13 @@ score = (relevance_match * 0.4) + (capability_match * 0.3) + (cost_efficiency * 
 }
 ```
 
-**LLM Model**: Gemini 2.5 Flash (low-latency, cost-optimized)
+**LLM Model**: Gemini 3 Flash (low-latency, cost-optimized)
 
 ---
 
 ### 2.4 Deep Research Agent (`agents/deep_research.py`)
 
-**Purpose**: Conduct fact-grounded research using Gemini 2.5 Pro + Google Search, including image discovery
+**Purpose**: Conduct fact-grounded research using Gemini 3 Pro + Google Search, including image discovery
 
 **Architecture**:
 
@@ -251,7 +260,7 @@ Input: {topic, research_depth, user_context, user_reference_image}
     ↓
 Check Redis Cache (L1)
     ↓
-If MISS: Invoke Gemini 2.5 Pro with Google Search Grounding
+If MISS: Invoke Gemini 3 Pro with Google Search Grounding
     - Multi-step iterative searching
     - Identifies knowledge gaps
     - Synthesizes from multiple sources
@@ -313,7 +322,7 @@ class ResearchImageSearcher:
 ```
 
 **Integration Details**:
-- **LLM**: Gemini 2.5 Pro (high quality for factual research)
+- **LLM**: Gemini 3 Pro (high quality for factual research with grounding)
 - **Grounding**: Automatic web search integration
 - **Citation Format**: Structured [source_id] references
 - **Depth Levels**: quick (5m), standard (15m), deep (30m)
@@ -414,18 +423,18 @@ Script writing focuses on:
 }
 ```
 
-**LLM Model**: Gemini 2.5 Pro (with tool use for scene composition)
+**LLM Model**: Gemini 3 Flash (structured outputs; tool vocab applied)
 
 ---
 
-### 2.6 Image Generator Agent (`agents/image_generator.py`)
+### 2.6 Image Generator Agent (`app/agents/image_generator.py`)
 
-**Purpose**: Generate reference images using Nano Banana Pro (Gemini 2.5 Pro Image)
+**Purpose**: Generate up to 3 reference images using Nano Banana Pro (Gemini 3 Pro Image) with Flash fallback
 
 **Image Count Logic**:
 - **Minimum**: 1 image
-- **Maximum**: 5 images
-- **Smart Reduction**: If user provided reference image OR research found images, reduce generated count
+- **Maximum**: 3 images (aligned with Veo max references)
+- **Strategy**: Always generate up to 3 images based on scenes. User/research images are used as style references during image generation and do not reduce generated count.
 
 ```python
 def calculate_images_to_generate(
@@ -433,43 +442,36 @@ def calculate_images_to_generate(
     research_image_count: int,
     scene_count: int
 ) -> int:
-    """Calculate how many images to generate (1-5 limit)."""
-    base_needed = min(scene_count, 5)  # Max 5 images
-    
-    # Reduce if we have external images
-    external_images = (1 if user_has_reference else 0) + research_image_count
-    
-    # Generate fewer if we have external images
-    to_generate = max(1, base_needed - external_images)
-    
-    return min(to_generate, 5)  # Never exceed 5
+    """Calculate how many images to generate (1-3 limit)."""
+    base_needed = min(scene_count, 3)
+    return max(1, base_needed)
 ```
 
 **Workflow**:
 ```
 Input: {script, scenes[], user_reference_image?, research_images[]}
     ↓
-Calculate images needed (1-5, reduced if external images exist)
+Generate 1-3 images (user/research images used as style references)
     ↓
 For each image:
     - Build prompt from scene description
     - Include user reference for style consistency
     - Apply category-specific style
     ↓
-Invoke Nano Banana Pro (Gemini 2.5 Pro Image)
+Invoke Nano Banana Pro (Gemini 3 Pro Image)
     ↓
 Upload to Supabase Storage
     ↓
 Persist to workflows.generated_images
     ↓
-Combine all images: user_ref + research + generated
+Combine all images for preview: user_ref + research + generated (Video Generator uses only generated)
     ↓
 Output: {all_image_urls[], generated_images[], metadata}
 ```
 
 **Integration Details**:
-- **API**: Nano Banana Pro (gemini-2.5-pro-image)
-- **Fallback**: Gemini 2.5 Flash for simple scenes
+- **API**: Nano Banana Pro (`gemini-3-pro-image-preview`)
+- **Fallback**: Gemini 2.5 Flash Image (`gemini-2.5-flash-image`)
 - **Resolution Support**: 1K (1024×1024), 2K (2048×2048)
 - **Generation Time**: ~13s @ 1K, ~16s @ 2K
 - **Cost Model**: ~$0.05 per image
@@ -482,7 +484,7 @@ Output: {all_image_urls[], generated_images[], metadata}
 
 ---
 
-### 2.7 Video Generator Agent (`agents/video_generator.py`)
+### 2.7 Video Generator Agent (`app/agents/video_generator.py`)
 
 **Purpose**: Generate final video using Veo 3.1 with multi-segment support for videos >8s
 
@@ -521,10 +523,12 @@ def plan_video_segments(duration_seconds: int) -> list[dict]:
 ```
 
 **Segment Continuity Strategy**:
-1. **First Segment**: Use reference images (user + research + generated)
+1. **First Segment**: Use reference images (generated images only)
 2. **Subsequent Segments**: Extract last frame from previous segment as `firstFrame` reference
 3. **Style Lock**: Apply same style/character prompts across all segments
 4. **Narrative Flow**: Script is split proportionally across segments
+
+Note: User/research images are applied earlier as style references during image generation to guide the generated images. Veo uses only the generated images (max 3) as references.
 
 **Prompt Engineering Strategy**:
 
@@ -555,9 +559,9 @@ No subtitles, no text overlay.
 
 | Parameter | Value Range | Default |
 |-----------|-------------|---------|
-| resolution | 720p, 1080p | User selected |
+| resolution | 720p, 1080p | 720p when multi-segment; otherwise user selected |
 | aspect_ratio | 16:9, 9:16 | User selected |
-| duration_seconds | 8-25 | User selected (per rule.md: direct 8-25s generation) |
+| duration_seconds | 8-25 | Implemented via 8s initial + 7s extensions |
 | frame_rate | 24 fps | Fixed |
 | audio_generation | true | Always enabled |
 | video_mode | TEXT_2_VIDEO or IMAGE_2_VIDEO | Determined by availability |
@@ -572,7 +576,7 @@ No subtitles, no text overlay.
 **Output Schema**:
 ```python
 {
-    "video_url": str,  # S3/Supabase Storage
+    "video_url": str,  # Supabase Storage URL
     "video_duration": float,
     "resolution": str,
     "aspect_ratio": str,
@@ -593,9 +597,9 @@ No subtitles, no text overlay.
 ```
 
 **Model Specs**:
-- **Model**: Google Veo 3.1 (state-of-the-art, native audio)
-- **Resolutions**: 720p, 1080p (per rule.md)
-- **Duration**: 8-25 seconds (direct generation, no stitching required per rule.md)
+- **Models**: Veo 3.1 and Veo 3.1 Fast (selectable)
+- **Resolutions**: 720p, 1080p (720p enforced for extensions)
+- **Duration**: 8-25 seconds (extensions for >8s)
 - **Audio**: Native multi-layer audio (dialogue, SFX, ambient)
 - **Cost Model**: ~$0.20-0.80 per video (depending on resolution/duration)
 
@@ -609,7 +613,7 @@ No subtitles, no text overlay.
 > step in the workflow after the Video Generator Agent completes.
 
 **Responsibilities**:
-- Upload video to S3/Supabase Storage
+- Upload video to Supabase Storage
 - Generate metadata (thumbnail, duration, encoding info)
 - Create job completion record in Supabase
 - Trigger webhook notifications
@@ -652,7 +656,7 @@ No subtitles, no text overlay.
    - Persist: workflows.tool_selection
    ↓
 4. DEEP RESEARCH
-   - Research topic with Gemini 2.5 Pro + Google Search
+   - Research topic with Gemini 3 Pro + Google Search grounding
    - Search and download reference images (Google Custom Search API)
    - [HITL GATE 2] If manual: pause for user review
      * User can edit/add facts
@@ -666,17 +670,17 @@ No subtitles, no text overlay.
      * User can provide feedback to regenerate
    - Persist: workflows.script_output
    ↓
-6. IMAGE GENERATION (1-5 images)
-   - Calculate images needed (reduced if external images exist)
-   - Generate with Nano Banana Pro (Gemini 2.5 Pro Image)
+6. IMAGE GENERATION (1-3 generated images)
+   - Generate up to 3 images with Nano Banana Pro (Gemini 3 Pro Image)
+   - Use user/research images only as style references during image generation
    - [HITL GATE 4] If manual: pause for user review
      * User can add additional reference images
      * User can provide feedback to regenerate
    - Persist: workflows.generated_images, media table
    ↓
 7. VIDEO GENERATION (Veo 3.1)
-   - Plan segments if duration > 8s
-   - Generate video with all reference images
+   - Plan segments if duration > 8s (initial + extensions)
+   - Generate video using ONLY the generated images as references (max 3)
    - Include audio if enabled
    - Generate subtitles if enabled
    - [HITL GATE 5] If manual: pause for user approval
@@ -865,13 +869,13 @@ Tool addition process:
 1. Create tool class inheriting VideoGenerationTool
 2. Implement required abstract methods
 3. Test via sandbox endpoint
-4. Register via POST /api/v1/tools/register
+4. Register via POST /api/v1/tools (AI-enhanced creation)
 5. Automatic indexing + caching
 ```
 
 **Dynamic Tool Addition** (Admin API):
 ```bash
-curl -X POST http://localhost:8000/api/v1/tools/register \
+curl -X POST http://localhost:8000/api/v1/tools \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer admin_token" \
   -d '{
@@ -1394,10 +1398,10 @@ from typing import Optional
 
 class LLMConfig(BaseSettings):
     """LLM Model Configuration"""
-    # All models use Gemini 2.5 family (no Gemini 3)
-    intent_tool_selector_model: str = "gemini-2.5-flash"  # Fast, cost-optimized
-    deep_research_model: str = "gemini-2.5-pro"  # High quality for research
-    script_writer_model: str = "gemini-2.5-pro"  # Creative, detailed scripts
+    # Production models (Gemini 3 family + stable 2.5 where applicable)
+    intent_tool_selector_model: str = "gemini-3-flash-preview"
+    deep_research_model: str = "gemini-3-pro-preview"  # With Google Search grounding
+    script_writer_model: str = "gemini-3-flash-preview"  # Structured outputs
     
     intent_router_temp: float = 0.3
     script_writer_temp: float = 0.7
@@ -1407,11 +1411,11 @@ class LLMConfig(BaseSettings):
 
 class ImageGenConfig(BaseSettings):
     """Image Generation Configuration"""
-    # Use Gemini 2.5 family only (Nano Banana Pro is gemini-2.5-pro-image)
-    model_fast: str = "gemini-2.5-flash"  # For simple scenes (speed)
-    model_quality: str = "gemini-2.5-pro-image"  # Nano Banana Pro for complex scenes
-    min_images: int = 1  # Minimum images to generate
-    max_images: int = 5  # Maximum images to generate
+    # Image generation (Nano Banana Pro / Flash)
+    model_fast: str = "gemini-2.5-flash-image"
+    model_quality: str = "gemini-3-pro-image-preview"
+    min_images: int = 1
+    max_images: int = 3
     endpoint: str = "https://api.nanobanana.ai/v1/generate"
     default_resolution: str = "1080p"  # 1K, 2K
     max_aspect_ratios: list = ["1:1"]
@@ -1450,9 +1454,11 @@ class RedisConfig(BaseSettings):
     
     # Cache keys
     cache_prefix: str = "raba:"
-    cache_research: str = "raba:research:{topic_hash}"
+    cache_research: str = "raba:research:{topic_hash}:{depth}"
     cache_tools: str = "raba:tools:list"
-    cache_scripts: str = "raba:script:{prompt_hash}"
+    cache_tools_by_category: str = "raba:tools:category:{category}"
+    cache_scripts: str = "raba:script:{research_hash}:{tool_id}"
+    cache_job_status: str = "raba:job:{workflow_id}"
 
 class SupabaseConfig(BaseSettings):
     """Supabase Configuration"""
@@ -1726,8 +1732,8 @@ CREATE TABLE config (
 
 -- Insert default config values
 INSERT INTO config (key, value, description) VALUES
-('llm_models', '{"intent_tool_selector": "gemini-2.5-flash", "deep_research": "gemini-2.5-pro", "script_writer": "gemini-2.5-pro"}', 'LLM model configuration'),
-('image_gen', '{"model_fast": "gemini-2.5-flash", "model_quality": "gemini-2.5-pro-image", "min_images": 1, "max_images": 5}', 'Image generation config'),
+('llm_models', '{"intent_tool_selector": "gemini-3-flash-preview", "deep_research": "gemini-3-pro-preview", "script_writer": "gemini-3-flash-preview"}', 'LLM model configuration'),
+('image_gen', '{"model_fast": "gemini-2.5-flash-image", "model_quality": "gemini-3-pro-image-preview", "min_images": 1, "max_images": 3}', 'Image generation config'),
 ('video_gen', '{"model": "veo-3.1", "max_segment_duration": 8, "enable_audio": true}', 'Video generation config'),
 ('categories', '["surreal_realism", "high_octane_anime", "stylized_3d"]', 'Available categories'),
 ('hitl_gates', '["tool_selection", "deep_research", "script_generation", "image_generation", "video_generation"]', 'HITL gate points');

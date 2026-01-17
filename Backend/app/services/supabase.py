@@ -229,6 +229,98 @@ class SupabaseService:
     ) -> Optional[dict[str, Any]]:
         """Update a workflow record."""
         return await self.workflows.update(workflow_id, updates)
+
+    async def delete_workflow(self, workflow_id: str) -> bool:
+        """Delete a workflow record.
+        
+        Args:
+            workflow_id: Workflow UUID
+        """
+        return await self.workflows.delete(workflow_id)
+
+    # ------------------------- Storage helpers -------------------------
+    async def delete_media_records(self, workflow_id: str) -> int:
+        """Delete rows from media table for a workflow.
+        
+        Returns number of deleted records when available, else 0.
+        """
+        try:
+            resp = (
+                self.client.table("media").delete().eq("workflow_id", workflow_id).execute()
+            )
+            if hasattr(resp, "data") and resp.data is not None:
+                return len(resp.data)
+        except Exception as e:
+            self._logger.error(f"Failed deleting media records: {e}")
+        return 0
+
+    def _list_storage(self, bucket: str, path: str) -> list[dict]:
+        try:
+            return self.client.storage.from_(bucket).list(path=path)
+        except Exception as e:
+            self._logger.warning(f"List storage failed for {bucket}/{path}: {e}")
+            return []
+
+    def _remove_storage_paths(self, bucket: str, paths: list[str]) -> int:
+        if not paths:
+            return 0
+        try:
+            self.client.storage.from_(bucket).remove(paths)
+            return len(paths)
+        except Exception as e:
+            self._logger.warning(f"Remove storage failed for {bucket} paths: {e}")
+            return 0
+
+    def _collect_paths_recursive(self, bucket: str, prefix: str) -> list[str]:
+        """Recursively collect file paths under a prefix."""
+        collected: list[str] = []
+        items = self._list_storage(bucket, prefix)
+        for it in items or []:
+            name = it.get("name") or ""
+            if not name:
+                continue
+            # Heuristic: files have an 'id'; folders may not
+            if it.get("id"):
+                collected.append(f"{prefix}{name}")
+            else:
+                # Assume folder; recurse
+                sub_prefix = f"{prefix}{name}/"
+                collected.extend(self._collect_paths_recursive(bucket, sub_prefix))
+        return collected
+
+    async def delete_storage_prefix(self, bucket: str, prefix: str) -> int:
+        """Delete all files under a storage prefix (recursive).
+        
+        Returns number of files scheduled for deletion.
+        """
+        paths = self._collect_paths_recursive(bucket, prefix)
+        deleted = self._remove_storage_paths(bucket, paths)
+        if deleted:
+            self._logger.info(f"Deleted {deleted} files under {bucket}/{prefix}")
+        return deleted
+
+    async def purge_workflow_storage(self, workflow_id: str) -> dict[str, int]:
+        """Purge all storage paths associated with a workflow.
+        
+        Attempts multiple known prefixes to account for legacy paths.
+        """
+        bucket = self.STORAGE_BUCKET
+        prefixes = [
+            f"generated_images/{workflow_id}/",
+            f"generated_images/generated_images/{workflow_id}/",
+            f"generated_videos/{workflow_id}/",
+            f"generated_videos/videos/{workflow_id}/",
+            f"research_images/{workflow_id}/",
+            f"reference_images/{workflow_id}/",
+        ]
+        results: dict[str, int] = {}
+        for p in prefixes:
+            try:
+                results[p] = await self.delete_storage_prefix(bucket, p)
+            except Exception as e:
+                self._logger.warning(f"Failed to purge prefix {p}: {e}")
+                results[p] = 0
+        return results
     
     async def _ensure_bucket_exists(self, bucket: str) -> bool:
         """
