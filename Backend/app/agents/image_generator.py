@@ -32,6 +32,7 @@ from app.models.image import (
     WorkflowImage,
 )
 from app.services.nano_banana import get_nano_banana_service
+from app.services.prompt_builder import get_prompt_builder
 from app.services.supabase import get_supabase_client
 from app.utils.logging import get_logger
 
@@ -41,95 +42,6 @@ logger = get_logger(__name__)
 MIN_GENERATED_IMAGES = 1  # Always generate at least 1 image
 MAX_GENERATED_IMAGES = 3  # Never generate more than 3 images
 VEO_MAX_REFERENCE_IMAGES = 3  # Veo 3.1 accepts max 3 reference images
-
-TOOL_VISUAL_VOCABULARY = {
-    "surreal_realism": {
-        "style_keywords": [
-            "flowing liquid-glass",
-            "photorealistic grounding",
-            "impossible physics",
-            "tangible phenomenon",
-            "color gradients",
-            "scientific wonder",
-            "hyperrealistic textures",
-            "dreamlike atmosphere",
-        ],
-        "camera_styles": [
-            "slow macro zoom",
-            "floating perspective",
-            "seamless transition",
-            "cinematic depth of field",
-        ],
-        "mood_keywords": [
-            "awe-inspiring",
-            "mysterious",
-            "scientifically beautiful",
-            "ethereal",
-        ],
-        "lighting": [
-            "soft volumetric lighting",
-            "golden hour glow",
-            "subtle rim lighting",
-        ],
-    },
-    "high_octane_anime": {
-        "style_keywords": [
-            "Sakuga-style animation",
-            "ink-splashes",
-            "elemental explosions",
-            "dynamic motion lines",
-            "calligraphic combat",
-            "philosophical duel",
-            "speed lines",
-            "impact frames",
-        ],
-        "camera_styles": [
-            "rapid cuts",
-            "dynamic tracking",
-            "impact frames",
-            "dramatic angles",
-        ],
-        "mood_keywords": [
-            "intense",
-            "epic",
-            "philosophical",
-            "high-energy",
-        ],
-        "lighting": [
-            "dramatic backlighting",
-            "high contrast",
-            "energy glow effects",
-        ],
-    },
-    "stylized_3d": {
-        "style_keywords": [
-            "miniature landscape",
-            "data diorama",
-            "clean 3D aesthetic",
-            "isometric view",
-            "stylized materials",
-            "low-poly charm",
-            "tilt-shift effect",
-        ],
-        "camera_styles": [
-            "orbital rotation",
-            "tilt-shift effect",
-            "smooth dolly",
-            "isometric perspective",
-        ],
-        "mood_keywords": [
-            "clean",
-            "informative",
-            "visually organized",
-            "playful",
-        ],
-        "lighting": [
-            "soft ambient lighting",
-            "studio lighting",
-            "even illumination",
-        ],
-    },
-}
 
 ASPECT_RATIO_MAP = {
     "9:16": ImageAspectRatio.PORTRAIT_9_16,
@@ -200,6 +112,7 @@ def build_image_prompt(
     tool_category: str,
     topic: str,
     duration_seconds: int,
+    anchor: dict | None = None,
 ) -> str:
     """Build image generation prompt from scene description.
     
@@ -216,8 +129,6 @@ def build_image_prompt(
     Returns:
         Formatted prompt for image generation
     """
-    vocab = TOOL_VISUAL_VOCABULARY.get(tool_category, TOOL_VISUAL_VOCABULARY["surreal_realism"])
-    
     parts = []
     
     parts.append(f"Create a high-quality image for Scene {scene_number} of {total_scenes} ")
@@ -229,15 +140,19 @@ def build_image_prompt(
         parts.append(f"{description}\n\n")
     
     parts.append("STYLE REQUIREMENTS:\n")
-    parts.append(f"- Visual Style: {', '.join(vocab['style_keywords'][:4])}\n")
-    parts.append(f"- Mood: {', '.join(vocab['mood_keywords'][:2])}\n")
-    parts.append(f"- Lighting: {', '.join(vocab['lighting'][:2])}\n\n")
+    if anchor:
+        parts.append(f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n")
+        parts.append(f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n")
+        parts.append(f"- Motion Language: {', '.join(anchor.get('motion_language', [])[:6])}\n")
+        if anchor.get('lighting'):
+            parts.append(f"- Lighting: {anchor.get('lighting')}\n")
+        if anchor.get('camera'):
+            parts.append(f"- Camera: {anchor.get('camera')}\n")
+    parts.append("\n")
     
     camera_direction = scene.get("camera_direction", "")
     if camera_direction:
         parts.append(f"CAMERA: {camera_direction}\n")
-    else:
-        parts.append(f"CAMERA: {vocab['camera_styles'][0]}\n")
     
     lighting = scene.get("lighting", "")
     if lighting:
@@ -267,6 +182,7 @@ class ImageGeneratorAgent:
         """Initialize the Image Generator Agent."""
         self.nano_banana = get_nano_banana_service()
         self.supabase = get_supabase_client()
+        self.prompt_builder = get_prompt_builder()
         logger.info("ImageGeneratorAgent initialized")
     
     async def run(self, state: VideoGenerationState) -> dict[str, Any]:
@@ -309,27 +225,102 @@ class ImageGeneratorAgent:
                 model=ImageModel.NANO_BANANA_PRO,
                 aspect_ratio=ASPECT_RATIO_MAP.get(aspect_ratio, ImageAspectRatio.PORTRAIT_9_16),
                 resolution=RESOLUTION_MAP.get(resolution, ImageResolution.RES_2K),
-                style_keywords=TOOL_VISUAL_VOCABULARY.get(tool_category, {}).get("style_keywords", []),
+                style_keywords=[],
                 maintain_consistency=True,
             )
             
             prompts = []
             selected_scenes = scenes[:images_to_generate]
+            anchor = state.get("global_style_anchor") or {}
             for i, scene in enumerate(selected_scenes):
-                prompt = build_image_prompt(
-                    scene=scene,
-                    scene_number=i + 1,
-                    total_scenes=len(selected_scenes),
-                    tool_category=tool_category,
-                    topic=topic,
-                    duration_seconds=duration_seconds,
-                )
-                prompts.append(prompt)
+                # Template-based prompt if available
+                template = (state.get("selected_tool") or {}).get("image_prompt_template")
+                if template:
+                    try:
+                        context = {
+                            "scene_description": scene.get("description", ""),
+                            "style": tool_category,
+                            "scene_number": i + 1,
+                            "total_scenes": len(selected_scenes),
+                            "camera_direction": scene.get("camera_direction", ""),
+                            "lighting": scene.get("lighting", ""),
+                            "mood": scene.get("mood", ""),
+                            "topic": topic,
+                            "duration_seconds": duration_seconds,
+                            # Global style anchor context
+                            "global_color_palette": ", ".join(anchor.get("color_palette", [])[:6]),
+                            "global_materials": ", ".join(anchor.get("materials", [])[:6]),
+                            "global_motion_language": ", ".join(anchor.get("motion_language", [])[:6]),
+                            "global_lighting": anchor.get("lighting", ""),
+                            "global_camera": anchor.get("camera", ""),
+                            "global_texture": anchor.get("texture", ""),
+                        }
+                        rr = self.prompt_builder.render(
+                            template,
+                            context,
+                            required=["scene_description", "style"],
+                            min_words=50,
+                            fallback_prompt_builder=lambda: build_image_prompt(
+                                scene=scene,
+                                scene_number=i + 1,
+                                total_scenes=len(selected_scenes),
+                                tool_category=tool_category,
+                                topic=topic,
+                                duration_seconds=duration_seconds,
+                                anchor=anchor,
+                            ),
+                        )
+                        prompts.append(rr.prompt)
+                        if rr.fallback_used:
+                            logger.warning(f"Image template fallback used for scene {i+1}")
+                        else:
+                            logger.info(f"Rendered image template for scene {i+1}")
+                    except Exception as e:
+                        logger.warning(f"Image template rendering failed for scene {i+1}: {e}; using fallback")
+                        prompts.append(
+                            build_image_prompt(
+                                scene=scene,
+                                scene_number=i + 1,
+                                total_scenes=len(selected_scenes),
+                                tool_category=tool_category,
+                                topic=topic,
+                                duration_seconds=duration_seconds,
+                            )
+                        )
+                else:
+                    prompt = build_image_prompt(
+                        scene=scene,
+                        scene_number=i + 1,
+                        total_scenes=len(selected_scenes),
+                        tool_category=tool_category,
+                        topic=topic,
+                        duration_seconds=duration_seconds,
+                    )
+                    # Append anchor to fallback prompt
+                    if anchor:
+                        prompt += (
+                            "\n\n[GLOBAL STYLE ANCHOR]\n"
+                            f"Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+                            f"Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+                            f"Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+                            f"Lighting: {anchor.get('lighting','')}\n"
+                            f"Camera: {anchor.get('camera','')}\n"
+                        )
+                    prompts.append(prompt)
             
             style_reference = self._build_style_reference(
                 tool_category=tool_category,
                 scenes=scenes,
             )
+            # Apply global style anchor into style reference for consistency
+            if anchor:
+                try:
+                    if anchor.get("style_description"):
+                        style_reference.style_description = anchor["style_description"]
+                    if anchor.get("color_palette"):
+                        style_reference.color_palette = list(anchor["color_palette"])[:5]
+                except Exception:
+                    pass
             
             # Download user reference image if provided
             user_ref_bytes = None
@@ -349,9 +340,20 @@ class ImageGeneratorAgent:
                     research_ref_bytes.append(img_bytes)
                 except Exception as e:
                     logger.warning(f"Failed to download research image: {e}")
+            # Add character reference images (if available) as high-priority style references
+            char_sheet = state.get("character_reference_sheet") or {}
+            char_refs = char_sheet.get("reference_images") or []
+            for ref in char_refs[:3]:
+                try:
+                    url = ref.get("url") if isinstance(ref, dict) else None
+                    if url:
+                        img_bytes = await self.nano_banana.download_image_as_bytes(url)
+                        research_ref_bytes.append(img_bytes)
+                except Exception as e:
+                    logger.warning(f"Failed to download character ref image: {e}")
             
             if research_ref_bytes:
-                logger.info(f"Downloaded {len(research_ref_bytes)} research images as style reference")
+                logger.info(f"Downloaded {len(research_ref_bytes)} style reference images (research + character)")
             
             logger.info(f"Generating {len(prompts)} images sequentially with style consistency")
             
@@ -451,7 +453,7 @@ class ImageGeneratorAgent:
         Extracts character descriptions, builds detailed style instructions,
         and creates color palette hints based on tool category.
         """
-        vocab = TOOL_VISUAL_VOCABULARY.get(tool_category, TOOL_VISUAL_VOCABULARY["surreal_realism"])
+        # The prompt-building phase passes anchors explicitly; keep this reference generic.
         
         # Extract character descriptions more thoroughly
         character_descriptions = []
@@ -473,27 +475,14 @@ class ImageGeneratorAgent:
         
         # Build comprehensive style description with detailed requirements
         style_description = (
-            f"VISUAL STYLE REQUIREMENTS (MUST BE CONSISTENT ACROSS ALL IMAGES):\n"
-            f"- Art Style: {', '.join(vocab['style_keywords'][:4])}\n"
-            f"- Mood & Atmosphere: {', '.join(vocab['mood_keywords'][:2])}\n"
-            f"- Lighting Style: {', '.join(vocab['lighting'][:2])}\n"
-            f"- Camera Approach: {', '.join(vocab['camera_styles'][:2])}\n\n"
-            f"CRITICAL: All images in this sequence must maintain EXACT visual consistency. "
-            f"Match color grading, artistic treatment, character appearances (if any), "
-            f"and overall visual style precisely across all images."
+            "VISUAL STYLE REQUIREMENTS (CONSISTENCY):\n"
+            "- Maintain identical color grading, lighting approach, and rendering quality across all images.\n"
+            "- Keep camera treatment and composition consistent for coherent sequencing.\n"
+            "- Characters (if any) must look identical across scenes (appearance, clothing, proportions).\n"
         )
         
         # Extract color palette hints based on tool category
         color_palette = []
-        if "surreal" in tool_category:
-            color_palette = ["vibrant blues", "golden yellows", "ethereal whites", "deep purples"]
-        elif "anime" in tool_category:
-            color_palette = ["high contrast", "saturated colors", "dramatic shadows", "vibrant hues"]
-        elif "3d" in tool_category or "stylized" in tool_category:
-            color_palette = ["clean pastels", "soft gradients", "muted tones", "professional lighting"]
-        else:
-            # Default palette hints
-            color_palette = ["consistent color grading", "harmonious palette", "matching saturation"]
         
         return StyleReference(
             style_description=style_description,

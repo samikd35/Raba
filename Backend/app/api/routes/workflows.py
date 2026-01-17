@@ -10,10 +10,11 @@ Phase 4.5.2 Implementation
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 
 from app.models.workflow import WorkflowOutput, WorkflowStatus
 from app.services.supabase import get_workflow_repository, get_supabase_service
+from app.services.workflow_runner import run_workflow_continue_background
 from app.utils.helpers import utc_now_iso
 from app.utils.logging import (
     get_logger,
@@ -159,6 +160,9 @@ async def get_workflow(workflow_id: str) -> WorkflowOutput:
                             if url:
                                 generated_images.append(url)
     
+    # Extract character_reference_sheet
+    character_reference_sheet = workflow.get("character_reference_sheet")
+    
     # Extract tool_selection - check multiple sources
     tool_selection = workflow.get("tool_selection")
     
@@ -196,6 +200,7 @@ async def get_workflow(workflow_id: str) -> WorkflowOutput:
         tool_selection=tool_selection,
         research_output=workflow.get("research_output"),
         script_output=workflow.get("script_output"),
+        character_reference_sheet=character_reference_sheet,
         generated_images=generated_images,
         video_url=video_url,
         error=workflow.get("error"),
@@ -345,6 +350,45 @@ async def delete_workflow(
     duration_ms = (time.time() - start_time) * 1000
     log_request_end(logger, "DELETE", f"/api/v1/workflows/{workflow_id}", 204, duration_ms)
     return None
+
+
+@router.post(
+    "/{workflow_id}/continue",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Continue failed workflow",
+    description="Resume a failed workflow from the last successfully persisted step. "
+    "Persisted outputs (tool_selection, research_output, script_output, character_reference_sheet, "
+    "generated_images, video_output) are loaded into state; nodes skip work when their output exists.",
+    tags=["video-generation"],
+)
+async def continue_workflow(workflow_id: str, background_tasks: BackgroundTasks):
+    """Start a continue-from-failed run for a workflow. Only allowed when status is 'failed'."""
+    start_time = time.time()
+    log_request_start(logger, "POST", f"/api/v1/workflows/{workflow_id}/continue")
+
+    repo = get_workflow_repository()
+    workflow = await repo.get_by_id(workflow_id)
+    if not workflow:
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/workflows/{workflow_id}/continue", 404, duration_ms)
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if workflow.get("deleted_at"):
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/workflows/{workflow_id}/continue", 404, duration_ms)
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if workflow.get("status") != "failed":
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", f"/api/v1/workflows/{workflow_id}/continue", 400, duration_ms)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only failed workflows can be continued. Current status: {workflow.get('status')}",
+        )
+
+    background_tasks.add_task(run_workflow_continue_background, workflow_id)
+    log_workflow_event(logger, workflow_id, "Continue from failed started")
+    duration_ms = (time.time() - start_time) * 1000
+    log_request_end(logger, "POST", f"/api/v1/workflows/{workflow_id}/continue", 202, duration_ms)
+    return {"workflow_id": workflow_id, "message": "Continue started", "status": "running"}
 
 
 @router.post(

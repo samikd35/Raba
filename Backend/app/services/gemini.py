@@ -98,15 +98,19 @@ class GeminiService:
             GeminiValidationError: If response doesn't match schema
         """
         client = self._get_client()
-        
+
+        # Gemini 3 Pro requires thinking_budget > 0. "Budget 0 is invalid. This model only works in thinking mode."
+        if "gemini-3-pro" in model.lower() and thinking_budget <= 0:
+            thinking_budget = 8192
+            logger.debug(f"gemini-3-pro requires thinking mode; using thinking_budget={thinking_budget}")
+
         config: dict[str, Any] = {
             "response_mime_type": "application/json",
             "response_json_schema": response_model.model_json_schema(),
             "temperature": temperature,
         }
         
-        # Disable thinking for structured output to avoid thought_signature warnings
-        # Thinking is not needed for JSON schema-constrained output
+        # Disable thinking for most models; Gemini 3 Pro requires it (handled above)
         try:
             config["thinking_config"] = types.ThinkingConfig(
                 thinking_budget=thinking_budget
@@ -174,7 +178,11 @@ class GeminiService:
             Generated text
         """
         client = self._get_client()
-        
+
+        # Gemini 3 Pro requires thinking_budget > 0
+        if "gemini-3-pro" in model.lower() and thinking_budget <= 0:
+            thinking_budget = 8192
+
         config: dict[str, Any] = {
             "temperature": temperature,
         }

@@ -15,6 +15,7 @@ from app.utils.logging import (
     log_key_value,
     log_success,
     log_error_msg,
+    log_warning_msg,
     log_agent_event,
     log_workflow_event,
     log_operation,
@@ -57,6 +58,10 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
     log_agent_event(logger, "IntentToolSelector", "Starting", workflow_id)
     log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
     
+    if state.get("selected_tool"):
+        logger.info("[CONTINUE] Skipping Intent/Tool Selector (selected_tool already in state)")
+        return {}
+    
     try:
         # Build tool list honoring user overrides
         tools_metadata: list[ToolMetadata] = []
@@ -89,6 +94,7 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
                     max_duration_seconds=60,
                     cost_per_request=0.5,
                     estimated_quality=0.8,
+                    script_prompt_template=tool.script_prompt_template,
                     video_prompt_template=tool.video_prompt_template,
                     image_prompt_template=tool.image_prompt_template,
                     example_topics=[],
@@ -114,6 +120,7 @@ async def intent_tool_selector_node(state: VideoGenerationState) -> dict:
                         max_duration_seconds=60,
                         cost_per_request=0.5,
                         estimated_quality=0.8,
+                        script_prompt_template=tr.script_prompt_template,
                         video_prompt_template=tr.video_prompt_template,
                         image_prompt_template=tr.image_prompt_template,
                         example_topics=[],
@@ -220,6 +227,10 @@ async def deep_research_node(state: VideoGenerationState) -> dict:
     log_agent_event(logger, "DeepResearch", "Starting", workflow_id)
     log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
     
+    if state.get("research_data"):
+        logger.info("[CONTINUE] Skipping Deep Research (research_data already in state)")
+        return {}
+    
     try:
         from app.agents.deep_research import get_deep_research_agent
         agent = get_deep_research_agent()
@@ -285,6 +296,142 @@ async def deep_research_node(state: VideoGenerationState) -> dict:
         }
 
 
+# New Phase 3 nodes
+async def visual_logic_validator_node(state: VideoGenerationState) -> dict:
+    """Node wrapper for VisualLogicValidatorAgent.
+    
+    Tracks revision attempts to prevent infinite loops.
+    """
+    if state.get("visual_validation"):
+        logger.info("[CONTINUE] Skipping Visual Logic Validator (visual_validation already in state)")
+        
+        # CRITICAL FIX: When skipping, check if we've hit the revision limit.
+        # If so, force requires_revision=False to break the infinite loop.
+        # The router will then route to Global Style Anchor instead of Script Writer.
+        vv = state.get("visual_validation") or {}
+        if vv.get("requires_revision"):
+            MAX_SCRIPT_REVISIONS = 2
+            revision_counts = state.get("regeneration_counts", {})
+            script_revision_count = revision_counts.get("script_validation", 0)
+            
+            if script_revision_count >= MAX_SCRIPT_REVISIONS:
+                logger.warning(
+                    f"[CONTINUE] Revision limit reached ({script_revision_count}/{MAX_SCRIPT_REVISIONS}). "
+                    "Forcing requires_revision=False to break loop."
+                )
+                # Return state update that sets requires_revision=False
+                updated_vv = dict(vv)
+                updated_vv["requires_revision"] = False
+                return {"visual_validation": updated_vv}
+            else:
+                # Still under limit, but we're skipping, so preserve the existing state
+                # The router will handle routing back to Script Writer
+                return {}
+        
+        return {}
+    try:
+        from app.agents.visual_logic_validator import VisualLogicValidatorAgent
+        agent = VisualLogicValidatorAgent()
+        result = await agent.run(state)
+        
+        # Increment revision count if validation requires revision (prevents infinite loops)
+        vv = result.get("visual_validation", {})
+        if vv.get("requires_revision"):
+            revision_counts = state.get("regeneration_counts", {})
+            current_count = revision_counts.get("script_validation", 0)
+            result["regeneration_counts"] = {
+                **revision_counts,
+                "script_validation": current_count + 1,
+            }
+            logger.info(f"Incremented script revision count to {current_count + 1}")
+        
+        return result
+    except Exception as e:
+        log_error_msg(logger, f"VisualLogicValidator failed: {e}")
+        return {"error": str(e)}
+
+
+async def global_style_anchor_node(state: VideoGenerationState) -> dict:
+    """Node wrapper for GlobalStyleAnchorAgent."""
+    if state.get("global_style_anchor"):
+        logger.info("[CONTINUE] Skipping Global Style Anchor (global_style_anchor already in state)")
+        return {}
+    try:
+        from app.agents.global_style_anchor import GlobalStyleAnchorAgent
+        agent = GlobalStyleAnchorAgent()
+        return await agent.run(state)
+    except Exception as e:
+        log_error_msg(logger, f"GlobalStyleAnchor failed: {e}")
+        return {"error": str(e)}
+
+
+async def character_reference_node(state: VideoGenerationState) -> dict:
+    """Node wrapper for CharacterReferenceGeneratorAgent."""
+    if state.get("character_reference_sheet"):
+        logger.info("[CONTINUE] Skipping Character Reference (character_reference_sheet already in state)")
+        return {}
+    try:
+        from app.agents.character_reference import CharacterReferenceGeneratorAgent
+        from app.services.supabase import get_workflow_repository
+
+        agent = CharacterReferenceGeneratorAgent()
+        result = await agent.run(state)
+        if result.get("error"):
+            return result
+
+        # Persist character_reference_sheet to workflow so GET /workflows/{id} can return it
+        sheet = result.get("character_reference_sheet")
+        if sheet:
+            workflow_id = state.get("workflow_id")
+            if workflow_id:
+                try:
+                    repo = get_workflow_repository()
+                    await repo.update(workflow_id, {
+                        "character_reference_sheet": sheet,
+                        "updated_at": utc_now_iso(),
+                    })
+                    logger.info(f"Persisted character_reference_sheet to database for workflow {workflow_id}")
+                except Exception as e:
+                    log_warning_msg(logger, f"Failed to persist character_reference_sheet: {e}")
+        return result
+    except Exception as e:
+        log_error_msg(logger, f"CharacterReference generation failed: {e}")
+        return {"error": str(e)}
+
+
+async def trim_agent_node(state: VideoGenerationState) -> dict:
+    """Node wrapper for TrimAgent."""
+    try:
+        from app.agents.trim_agent import TrimAgent
+        agent = TrimAgent()
+        return await agent.run(state)
+    except Exception as e:
+        log_error_msg(logger, f"TrimAgent failed: {e}")
+        return {"error": str(e)}
+
+
+async def overlay_generator_node(state: VideoGenerationState) -> dict:
+    """Node wrapper for OverlayGeneratorAgent."""
+    try:
+        from app.agents.overlay_generator import OverlayGeneratorAgent
+        agent = OverlayGeneratorAgent()
+        return await agent.run(state)
+    except Exception as e:
+        log_error_msg(logger, f"OverlayGenerator failed: {e}")
+        return {"error": str(e)}
+
+
+async def video_compositor_node(state: VideoGenerationState) -> dict:
+    """Node wrapper for VideoCompositorAgent."""
+    try:
+        from app.agents.video_compositor import VideoCompositorAgent
+        agent = VideoCompositorAgent()
+        return await agent.run(state)
+    except Exception as e:
+        log_error_msg(logger, f"VideoCompositor failed: {e}")
+        return {"error": str(e)}
+
+
 async def script_writer_node(state: VideoGenerationState) -> dict:
     """
     LangGraph node for Script Writer.
@@ -322,6 +469,10 @@ async def script_writer_node(state: VideoGenerationState) -> dict:
     logger.info(f"[SCRIPT INPUT] Research data keys: {list(research_data.keys()) if research_data else 'None'}")
     findings_count = len(research_data.get("research_findings", []))
     logger.info(f"[SCRIPT INPUT] Research findings count: {findings_count}")
+    
+    if state.get("script_output"):
+        logger.info("[CONTINUE] Skipping Script Writer (script_output already in state)")
+        return {}
     
     try:
         from app.agents.script_writer import get_script_writer_agent
@@ -435,6 +586,11 @@ async def image_generator_node(state: VideoGenerationState) -> dict:
     log_header(logger, f"AGENT: Image Generator")
     log_agent_event(logger, "ImageGenerator", "Starting", workflow_id)
     log_key_value(logger, "Topic", topic[:60] + "..." if len(topic) > 60 else topic)
+    
+    imgs = state.get("generated_images") or []
+    if isinstance(imgs, list) and len(imgs) > 0:
+        logger.info("[CONTINUE] Skipping Image Generator (generated_images already in state)")
+        return {}
     
     try:
         from app.agents.image_generator import ImageGeneratorAgent
@@ -560,6 +716,10 @@ async def video_generator_node(state: VideoGenerationState) -> dict:
         for i, img_url in enumerate(generated_images[:3], 1):
             logger.info(f"[VIDEO INPUT] Gen Image {i}: {img_url[:80]}...")
     logger.info(f"[VIDEO INPUT] Research images (reference only): {len(research_images) if research_images else 0}")
+    
+    if state.get("final_video_url") or state.get("video_url"):
+        logger.info("[CONTINUE] Skipping Video Generator (video already in state)")
+        return {}
     
     try:
         from app.agents.video_generator import VideoGeneratorAgent

@@ -3,7 +3,7 @@
 Full CRUD operations for video generation tools with AI-enhanced creation.
 """
 
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -17,6 +17,11 @@ from app.models.tool import (
     ToolListResponse,
     ToolResponse,
     ToolUpdate,
+    PromptBulkUpdateRequest,
+    PromptBulkUpdateResponse,
+    ToolPromptUpdateRequest,
+    ToolPromptUpdateResponse,
+    PromptUpdateType,
 )
 from app.services.tool_enhancer import get_tool_enhancer
 from app.services.tool_executor import get_tool_executor, ParameterValidationError
@@ -34,6 +39,9 @@ from app.utils.logging import (
     log_subheader,
 )
 import time
+from app.services.prompt_builder import get_prompt_builder
+from app.services.template_validation import get_template_validator
+from app.utils.security import validate_uuid
 
 logger = get_logger(__name__)
 
@@ -130,9 +138,60 @@ async def create_tool(request: ToolCreate) -> ToolResponse:
     })
     
     try:
-        with log_operation(logger, "Enhance tool idea with Gemini"):
-            enhancer = get_tool_enhancer()
-            enhanced = await enhancer.enhance_tool_idea(request)
+        enhancer = get_tool_enhancer()
+        validator = get_template_validator()
+        builder = get_prompt_builder()
+        
+        # Retry logic for validation failures
+        max_retries = 2
+        enhanced = None
+        validation_errors = None
+        
+        for attempt in range(max_retries + 1):
+            with log_operation(logger, f"Enhance tool idea with Gemini (attempt {attempt + 1})"):
+                enhanced = await enhancer.enhance_tool_idea(
+                    request,
+                    retry_count=attempt,
+                    max_retries=max_retries,
+                    validation_errors=validation_errors,
+                )
+            
+            # Validate templates
+            temp_errors: list[str] = []
+            if enhanced.script_prompt_template:
+                ok, errs = builder.quality_validate(enhanced.script_prompt_template, ["topic", "tone", "duration"], 150)
+                if not ok:
+                    temp_errors.extend([f"script: {e}" for e in errs])
+                ok2, errs2 = validator.validate_script(enhanced.script_prompt_template)
+                if not ok2:
+                    temp_errors.extend([f"script: {e}" for e in errs2])
+            
+            if enhanced.image_prompt_template:
+                ok, errs = builder.quality_validate(enhanced.image_prompt_template, ["scene_description", "style"], 150)
+                if not ok:
+                    temp_errors.extend([f"image: {e}" for e in errs])
+                ok2, errs2 = validator.validate_image(enhanced.image_prompt_template)
+                if not ok2:
+                    temp_errors.extend([f"image: {e}" for e in errs2])
+            
+            if enhanced.video_prompt_template:
+                ok, errs = builder.quality_validate(enhanced.video_prompt_template, ["script", "duration"], 150)
+                if not ok:
+                    temp_errors.extend([f"video: {e}" for e in errs])
+                ok2, errs2 = validator.validate_video(enhanced.video_prompt_template)
+                if not ok2:
+                    temp_errors.extend([f"video: {e}" for e in errs2])
+            
+            if not temp_errors:
+                # Validation passed, break out of retry loop
+                break
+            else:
+                validation_errors = temp_errors
+                if attempt < max_retries:
+                    log_warning_msg(logger, f"Validation failed on attempt {attempt + 1}, retrying with fixes: {validation_errors}")
+                else:
+                    log_warning_msg(logger, f"Validation failed after all retries: {validation_errors}")
+                    # Continue anyway - let it be saved but log the warning
         
         log_key_value(logger, "Generated tool_id", enhanced.tool_id)
         log_key_value(logger, "Category", enhanced.category.value)
@@ -403,3 +462,335 @@ async def execute_tool(tool_id: str, request: ToolExecutionRequest) -> ToolExecu
         duration_ms = (time.time() - start_time) * 1000
         log_request_end(logger, "POST", f"/api/v1/tools/{tool_id}/execute", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/prompts/bulk-update", response_model=PromptBulkUpdateResponse)
+async def bulk_update_prompts(request: PromptBulkUpdateRequest) -> PromptBulkUpdateResponse:
+    """Bulk update prompt templates for multiple tools.
+
+    - Supports AI enhancement using existing tool context
+    - Validates placeholders and minimum quality (150 words)
+    - Updates only specified templates per update_type
+    - When update_type is 'all' and tool_ids is None/empty, updates all tools in database
+    """
+    start_time = time.time()
+    log_header(logger, "BULK PROMPT UPDATE")
+    
+    registry = get_tool_registry()
+    enhancer = get_tool_enhancer()
+    builder = get_prompt_builder()
+    validator = get_template_validator()
+
+    # Determine which tools to update
+    tools_to_process: list[ToolResponse] = []
+    
+    # When update_type is "all", fetch ALL tools from database (ignore tool_ids completely)
+    if request.update_type == PromptUpdateType.ALL:
+        # Validate: when update_type is "all", use_ai_enhancement must be True
+        # (can't provide manual prompts for all tools)
+        if not request.use_ai_enhancement:
+            raise HTTPException(
+                status_code=400,
+                detail="use_ai_enhancement must be True when update_type is 'all' (cannot provide manual prompts for all tools)"
+            )
+        
+        log_key_value(logger, "Update mode", "ALL tools in database")
+        # Fetch all active tools from database - no tool_ids needed
+        all_tools_result = await registry.list_tools(is_active=True, limit=1000, offset=0)
+        tools_to_process = all_tools_result.tools
+        log_key_value(logger, "Fetched tools from DB", len(tools_to_process))
+    else:
+        # For specific update types, tool_ids must be provided
+        if not request.tool_ids or len(request.tool_ids) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="tool_ids must be provided when update_type is not 'all'"
+            )
+        
+        # Process specific tool IDs
+        log_key_value(logger, "Update mode", f"Specific tools: {len(request.tool_ids)}")
+        for tool_id in request.tool_ids:
+            tool = await registry.get_by_tool_id(tool_id)
+            if not tool:
+                # Only try get_by_id if it looks like a UUID
+                if validate_uuid(tool_id):
+                    tool = await registry.get_by_id(tool_id)
+                if not tool:
+                    log_warning_msg(logger, f"Tool not found: {tool_id}")
+                    continue
+            tools_to_process.append(tool)
+
+    log_request_start(logger, "POST", "/api/v1/tools/prompts/bulk-update", {
+        "tool_count": len(tools_to_process),
+        "update_type": request.update_type.value,
+        "use_ai_enhancement": request.use_ai_enhancement,
+    })
+
+    updated_tools: list[ToolResponse] = []
+    failed_updates: list[dict[str, Any]] = []
+    details: list[dict[str, Any]] = []
+
+    def validate_set(tpl: Optional[str], req: list[str], which: str) -> list[str]:
+        if not tpl:
+            return []
+        ok, errs = builder.quality_validate(tpl, req, 150)
+        errors = list(errs)
+        if which == "script":
+            ok2, errs2 = validator.validate_script(tpl)
+        elif which == "image":
+            ok2, errs2 = validator.validate_image(tpl)
+        else:
+            ok2, errs2 = validator.validate_video(tpl)
+        if not ok2:
+            errors.extend(errs2)
+        return [] if ok and ok2 else errors
+
+    for tool in tools_to_process:
+        try:
+            tool_id = tool.tool_id
+            match_type = "tool_id"
+            
+            # Build proposed templates
+            script_tpl = image_tpl = video_tpl = None
+            t0 = time.time()
+            log_key_value(logger, "Processing tool", tool_id)
+            if request.use_ai_enhancement:
+                # Retry logic for validation failures
+                max_retries = 2
+                improved = None
+                validation_errors = None
+                
+                for attempt in range(max_retries + 1):
+                    with log_operation(logger, f"AI enhance templates ({tool_id}) - attempt {attempt + 1}"):
+                        # Use tool enhancer to regenerate prompts (same system as tool creation)
+                        # This uses the system-wide prompt builder/enhancer to improve prompts
+                        # Ensure improvement_reason meets minimum length requirement (10 chars)
+                        default_reason = "System-wide prompt quality improvement to match latest standards"
+                        improvement_reason = request.improvement_reason or default_reason
+                        # If provided reason is too short, use default
+                        if improvement_reason and len(improvement_reason.strip()) < 10:
+                            improvement_reason = default_reason
+                        
+                        improved = await enhancer.improve_tool(
+                            tool, 
+                            ToolImproveRequest(
+                                improvement_suggestion=improvement_reason,
+                                preserve_templates=False,
+                            ),
+                            retry_count=attempt,
+                            max_retries=max_retries,
+                            validation_errors=validation_errors,
+                        )
+                    
+                    script_tpl = improved.script_prompt_template
+                    image_tpl = improved.image_prompt_template
+                    video_tpl = improved.video_prompt_template
+                    
+                    # Filter by update_type before validation
+                    if request.update_type == PromptUpdateType.SCRIPT_ONLY:
+                        image_tpl = None; video_tpl = None
+                    elif request.update_type == PromptUpdateType.IMAGE_ONLY:
+                        script_tpl = None; video_tpl = None
+                    elif request.update_type == PromptUpdateType.VIDEO_ONLY:
+                        script_tpl = None; image_tpl = None
+                    elif request.update_type == PromptUpdateType.SCRIPT_AND_IMAGE:
+                        video_tpl = None
+                    elif request.update_type == PromptUpdateType.SCRIPT_AND_VIDEO:
+                        image_tpl = None
+                    elif request.update_type == PromptUpdateType.IMAGE_AND_VIDEO:
+                        script_tpl = None
+                    
+                    # Validate templates
+                    temp_errors: list[str] = []
+                    temp_errors += [e for e in validate_set(script_tpl, ["topic", "tone", "duration"], "script")]
+                    temp_errors += [e for e in validate_set(image_tpl, ["scene_description", "style"], "image")]
+                    temp_errors += [e for e in validate_set(video_tpl, ["script", "duration"], "video")]
+                    
+                    if not temp_errors:
+                        # Validation passed, break out of retry loop
+                        log_key_value(logger, "AI enhancement", "completed and validated")
+                        break
+                    else:
+                        validation_errors = temp_errors
+                        if attempt < max_retries:
+                            log_warning_msg(logger, f"Validation failed on attempt {attempt + 1}, retrying with fixes: {validation_errors}")
+                        else:
+                            log_key_value(logger, "AI enhancement", "completed but validation failed after all retries")
+            else:
+                if request.prompts:
+                    script_tpl = request.prompts.script_prompt_template
+                    image_tpl = request.prompts.image_prompt_template
+                    video_tpl = request.prompts.video_prompt_template
+                log_key_value(logger, "Using provided prompts", bool(request.prompts))
+                
+                # Filter by update_type for manual prompts
+                if request.update_type == PromptUpdateType.SCRIPT_ONLY:
+                    image_tpl = None; video_tpl = None
+                elif request.update_type == PromptUpdateType.IMAGE_ONLY:
+                    script_tpl = None; video_tpl = None
+                elif request.update_type == PromptUpdateType.VIDEO_ONLY:
+                    script_tpl = None; image_tpl = None
+                elif request.update_type == PromptUpdateType.SCRIPT_AND_IMAGE:
+                    video_tpl = None
+                elif request.update_type == PromptUpdateType.SCRIPT_AND_VIDEO:
+                    image_tpl = None
+                elif request.update_type == PromptUpdateType.IMAGE_AND_VIDEO:
+                    script_tpl = None
+                
+                # Validate manual prompts (no retry for manual prompts)
+                errors: list[str] = []
+                errors += [f"script: {e}" for e in validate_set(script_tpl, ["topic", "tone", "duration"], "script")]
+                errors += [f"image: {e}" for e in validate_set(image_tpl, ["scene_description", "style"], "image")]
+                errors += [f"video: {e}" for e in validate_set(video_tpl, ["script", "duration"], "video")]
+            
+            # Final validation check (for AI-enhanced prompts that failed after retries)
+            if request.use_ai_enhancement:
+                errors: list[str] = []
+                errors += [f"script: {e}" for e in validate_set(script_tpl, ["topic", "tone", "duration"], "script")]
+                errors += [f"image: {e}" for e in validate_set(image_tpl, ["scene_description", "style"], "image")]
+                errors += [f"video: {e}" for e in validate_set(video_tpl, ["script", "duration"], "video")]
+            
+            if errors:
+                err_msg = "; ".join(errors)
+                failed_updates.append({"tool_id": tool_id, "error": err_msg, "stage": "validation"})
+                log_key_value(logger, "Validation failed", err_msg)
+                details.append({
+                    "input": tool_id,
+                    "match_type": match_type,
+                    "used_ai": request.use_ai_enhancement,
+                    "status": "failed",
+                    "stage": "validation",
+                    "errors": errors,
+                })
+                continue
+
+            with log_operation(logger, f"Persist update ({tool_id})"):
+                saved = await registry.update(tool_id, ToolUpdate(
+                    script_prompt_template=script_tpl,
+                    image_prompt_template=image_tpl,
+                    video_prompt_template=video_tpl,
+                ))
+            updated_tools.append(saved)
+            log_key_value(logger, "Updated tool", f"{tool_id} -> v{saved.version}")
+            elapsed = int((time.time() - t0) * 1000)
+            log_key_value(logger, "Elapsed (ms)", elapsed)
+            details.append({
+                "input": tool_id,
+                "match_type": match_type,
+                "used_ai": request.use_ai_enhancement,
+                "status": "updated",
+                "new_version": saved.version,
+                "elapsed_ms": elapsed,
+            })
+        except Exception as e:
+            tool_id_for_error = tool.tool_id if tool else "unknown"
+            failed_updates.append({"tool_id": tool_id_for_error, "error": str(e), "stage": "unexpected"})
+            log_error_msg(logger, f"Failed updating {tool_id_for_error}: {e}")
+
+    duration_ms = (time.time() - start_time) * 1000
+    log_request_end(logger, "POST", "/api/v1/tools/prompts/bulk-update", 200, duration_ms)
+    summary = PromptBulkUpdateResponse(
+        updated_count=len(updated_tools),
+        failed_updates=failed_updates,
+        updated_tools=updated_tools,
+        improvement_summary=request.improvement_reason,
+        details=details,
+    )
+    log_success(logger, f"Bulk prompt update complete: updated={summary.updated_count}, failed={len(summary.failed_updates)}")
+    return summary
+
+
+@router.put("/{tool_id}/prompts", response_model=ToolPromptUpdateResponse)
+async def update_tool_prompts(tool_id: str, request: ToolPromptUpdateRequest) -> ToolPromptUpdateResponse:
+    """Update prompt templates for a single tool with validation and AI option."""
+    start_time = time.time()
+    log_request_start(logger, "PUT", f"/api/v1/tools/{tool_id}/prompts", {
+        "update_type": request.update_type.value,
+        "use_ai_enhancement": request.use_ai_enhancement,
+    })
+
+    registry = get_tool_registry()
+    enhancer = get_tool_enhancer()
+    builder = get_prompt_builder()
+    validator = get_template_validator()
+
+    tool = await registry.get_by_tool_id(tool_id)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool not found: {tool_id}")
+
+    script_tpl = image_tpl = video_tpl = None
+    if request.use_ai_enhancement:
+        t0 = time.time()
+        with log_operation(logger, f"AI enhance templates ({tool_id})"):
+            improved = await enhancer.improve_tool(tool, ToolImproveRequest(
+                improvement_suggestion=request.improvement_reason,
+                preserve_templates=False,
+            ))
+        script_tpl = improved.script_prompt_template
+        image_tpl = improved.image_prompt_template
+        video_tpl = improved.video_prompt_template
+        log_key_value(logger, "AI enhancement", f"completed in {int((time.time()-t0)*1000)}ms")
+    else:
+        if not request.prompts:
+            raise HTTPException(status_code=400, detail="prompts must be provided when use_ai_enhancement=false")
+        script_tpl = request.prompts.script_prompt_template
+        image_tpl = request.prompts.image_prompt_template
+        video_tpl = request.prompts.video_prompt_template
+
+    # Filter by update_type
+    if request.update_type == PromptUpdateType.SCRIPT_ONLY:
+        image_tpl = None; video_tpl = None
+    elif request.update_type == PromptUpdateType.IMAGE_ONLY:
+        script_tpl = None; video_tpl = None
+    elif request.update_type == PromptUpdateType.VIDEO_ONLY:
+        script_tpl = None; image_tpl = None
+    elif request.update_type == PromptUpdateType.SCRIPT_AND_IMAGE:
+        video_tpl = None
+    elif request.update_type == PromptUpdateType.SCRIPT_AND_VIDEO:
+        image_tpl = None
+    elif request.update_type == PromptUpdateType.IMAGE_AND_VIDEO:
+        script_tpl = None
+
+    # Validate
+    def qual(tpl: Optional[str], req: list[str], which: str) -> list[str]:
+        if not tpl:
+            return []
+        ok, errs = builder.quality_validate(tpl, req, 150)
+        if which == "script":
+            ok2, errs2 = validator.validate_script(tpl)
+        elif which == "image":
+            ok2, errs2 = validator.validate_image(tpl)
+        else:
+            ok2, errs2 = validator.validate_video(tpl)
+        errors = list(errs)
+        if not ok2:
+            errors.extend(errs2)
+        return [] if ok and ok2 else errors
+
+    errors: list[str] = []
+    errors += [f"script: {e}" for e in qual(script_tpl, ["topic", "tone", "duration"], "script")]
+    errors += [f"image: {e}" for e in qual(image_tpl, ["scene_description", "style"], "image")]
+    errors += [f"video: {e}" for e in qual(video_tpl, ["script", "duration"], "video")]
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+    with log_operation(logger, f"Persist update ({tool_id})"):
+        saved = await registry.update(tool_id, ToolUpdate(
+            script_prompt_template=script_tpl,
+            image_prompt_template=image_tpl,
+            video_prompt_template=video_tpl,
+        ))
+    log_key_value(logger, "Updated tool", f"{tool_id} -> v{saved.version}")
+
+    duration_ms = (time.time() - start_time) * 1000
+    log_request_end(logger, "PUT", f"/api/v1/tools/{tool_id}/prompts", 200, duration_ms)
+    return ToolPromptUpdateResponse(
+        tool_id=tool_id,
+        updated_templates={
+            "script": bool(script_tpl),
+            "image": bool(image_tpl),
+            "video": bool(video_tpl),
+        },
+        improvement_summary=request.improvement_reason,
+        new_version=saved.version,
+    )

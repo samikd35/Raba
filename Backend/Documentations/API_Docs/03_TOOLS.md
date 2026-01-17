@@ -29,6 +29,34 @@ Tools can be created from simple ideas - Gemini 2.5 Flash enhances them into ful
 | `POST` | `/api/v1/tools/preview` | Preview AI enhancement |
 | `POST` | `/api/v1/tools/{tool_id}/improve` | Improve existing tool |
 | `POST` | `/api/v1/tools/{tool_id}/execute` | Execute tool with topic |
+| `POST` | `/api/v1/tools/prompts/bulk-update` | Bulk update prompt templates |
+| `PUT` | `/api/v1/tools/{tool_id}/prompts` | Update prompts for a single tool |
+
+### POST /api/v1/tools/prompts/bulk-update
+
+Update prompt templates for multiple tools.
+
+Request (application/json):
+
+```
+{
+  "tool_ids": ["tool_a", "tool_b"],
+  "update_type": "all",
+  "improvement_reason": "Quality uplift to Phase 4 standards",
+  "use_ai_enhancement": true,
+  "prompts": {              // optional when use_ai_enhancement=true
+    "script_prompt_template": "...",
+    "image_prompt_template": "...",
+    "video_prompt_template": "..."
+  }
+}
+```
+
+Notes:
+- When `use_ai_enhancement` is false, provide `prompts` with the templates you want to set.
+- No `preserve_structure` flag: the system applies validation and updates the templates provided or AI-enhanced ones.
+
+Response (200): includes `updated_count`, `failed_updates`, `updated_tools`, and `improvement_summary`.
 
 ---
 

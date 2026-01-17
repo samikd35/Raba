@@ -161,7 +161,7 @@ def build_workflow_summary(state: dict[str, Any]) -> dict[str, Any]:
         "segment_count": segment_count,
         "viral_score": script_output.get("viral_score") or state.get("viral_score"),
         "hitl_mode": state.get("hitl_mode", "auto"),
-        "audio_enabled": state.get("enable_audio", True),
+        "audio_enabled": state.get("enable_audio", False),
         "subtitles_enabled": state.get("enable_subtitles", False),
     }
 

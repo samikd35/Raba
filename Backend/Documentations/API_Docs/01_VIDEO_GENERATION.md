@@ -38,7 +38,7 @@ Create a new video generation workflow using JSON body.
   "category": "auto",
   "tool_id": "optional tool id under category",
   "hitl_mode": "auto",
-  "enable_audio": true,
+  "enable_audio": false,
   "enable_subtitles": false
 }
 ```
@@ -54,7 +54,7 @@ Create a new video generation workflow using JSON body.
 | `category` | enum | ❌ | `"auto"` | Visual style category (if not `auto`, agent will only consider tools in this category) |
 | `tool_id` | string | ❌ | `null` | Optional specific tool_id. If provided, agent must use this tool. If both `category` and `tool_id` are provided, tool must belong to the category. |
 | `hitl_mode` | enum | ❌ | `"auto"` | Human-in-the-loop mode (`"auto"`, `"manual"`) |
-| `enable_audio` | boolean | ❌ | `true` | Generate audio with video |
+| `enable_audio` | boolean | ❌ | `false` | Generate audio with video (requires explicit enable) |
 | `enable_subtitles` | boolean | ❌ | `false` | Generate subtitles |
 
 ### Category Options
@@ -123,7 +123,7 @@ Create a workflow with an optional reference image upload.
 | `category` | enum | ❌ | Category (default: `auto`); if not `auto`, agent will only consider tools in this category |
 | `tool_id` | string | ❌ | Optional specific tool_id (must belong to `category` when category != `auto`) |
 | `hitl_mode` | enum | ❌ | HITL mode (default: `auto`) |
-| `enable_audio` | boolean | ❌ | Generate audio (default: `true`) |
+| `enable_audio` | boolean | ❌ | Generate audio (default: `false`) |
 | `enable_subtitles` | boolean | ❌ | Generate subtitles (default: `false`) |
 | `reference_image` | file | ❌ | Reference image (max 10MB) |
 

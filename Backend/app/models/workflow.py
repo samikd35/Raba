@@ -99,7 +99,7 @@ class WorkflowInput(BaseModel):
     )
     
     enable_audio: bool = Field(
-        default=True,
+        default=False,
         description="Generate audio with video"
     )
     
@@ -147,6 +147,7 @@ class WorkflowOutput(BaseModel):
     tool_selection: Optional[dict[str, Any]] = Field(default=None, description="Tool selection output")
     research_output: Optional[dict[str, Any]] = Field(default=None, description="Research output")
     script_output: Optional[dict[str, Any]] = Field(default=None, description="Script output")
+    character_reference_sheet: Optional[dict[str, Any]] = Field(default=None, description="Character reference sheet with images")
     generated_images: Optional[list[str]] = Field(default=None, description="Generated image URLs")
     video_url: Optional[str] = Field(default=None, description="Final video URL")
     

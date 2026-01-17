@@ -29,72 +29,12 @@ from app.models.script import (
     ViralMetrics,
 )
 from app.services.gemini import GEMINI_3_FLASH, get_gemini_service
+from app.services.prompt_builder import get_prompt_builder
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-TOOL_VISUAL_VOCABULARY = {
-    "surreal_realism": {
-        "style_keywords": [
-            "flowing liquid-glass",
-            "photorealistic grounding",
-            "impossible physics",
-            "tangible phenomenon",
-            "color gradients",
-            "scientific wonder",
-        ],
-        "camera_styles": [
-            "slow macro zoom",
-            "floating perspective",
-            "seamless transition",
-        ],
-        "mood_keywords": [
-            "awe-inspiring",
-            "mysterious",
-            "scientifically beautiful",
-        ],
-    },
-    "high_octane_anime": {
-        "style_keywords": [
-            "Sakuga-style",
-            "ink-splashes",
-            "elemental explosions",
-            "dynamic motion lines",
-            "calligraphic combat",
-            "philosophical duel",
-        ],
-        "camera_styles": [
-            "rapid cuts",
-            "dynamic tracking",
-            "impact frames",
-        ],
-        "mood_keywords": [
-            "intense",
-            "epic",
-            "philosophical",
-        ],
-    },
-    "stylized_3d": {
-        "style_keywords": [
-            "miniature landscape",
-            "data diorama",
-            "clean 3D aesthetic",
-            "isometric view",
-            "stylized materials",
-        ],
-        "camera_styles": [
-            "orbital rotation",
-            "tilt-shift effect",
-            "smooth dolly",
-        ],
-        "mood_keywords": [
-            "clean",
-            "informative",
-            "visually organized",
-        ],
-    },
-}
 
 HOOK_ARCHETYPE_MAP = {
     "educational": [HookArchetype.TEACHER, HookArchetype.FORTUNETELLER],
@@ -144,13 +84,23 @@ def _build_hook_prompt(
     research_summary: str,
     selected_archetype: HookArchetype,
     tool_category: str,
+    anchor: dict | None = None,
 ) -> str:
     """Build prompt for hook generation.
     
     Reference: prompting_Docs.md - Context first, then task at end.
     """
-    tool_vocab = TOOL_VISUAL_VOCABULARY.get(tool_category, TOOL_VISUAL_VOCABULARY["surreal_realism"])
-    
+    anchor_block = ""
+    if anchor:
+        anchor_block = (
+            f"\nGlobal Style Anchor:\n"
+            f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+            f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+            f"- Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+            f"- Lighting: {anchor.get('lighting','')}\n"
+            f"- Camera: {anchor.get('camera','')}\n"
+        )
+
     return f"""<context>
 Topic: {topic}
 Intent Type: {intent_type}
@@ -160,8 +110,7 @@ Visual Style: {tool_category}
 
 Research Summary:
 {research_summary}
-
-Tool Visual Keywords: {', '.join(tool_vocab['style_keywords'])}
+{anchor_block}
 </context>
 
 <examples>
@@ -220,17 +169,29 @@ def _build_scenes_prompt(
     tool_category: str,
     scene_count: int,
     is_fictional: bool,
+    anchor: dict | None = None,
 ) -> str:
     """Build prompt for scene generation.
     
     Reference: prompting_Docs.md - Structured prompts with clear examples.
     """
-    tool_vocab = TOOL_VISUAL_VOCABULARY.get(tool_category, TOOL_VISUAL_VOCABULARY["surreal_realism"])
     remaining_duration = duration_seconds - hook_duration - 1.5  # Reserve 1.5s for CTA
     avg_scene_duration = remaining_duration / scene_count
     
     content_type = "fictional/creative" if is_fictional else "factual/educational"
     
+    anchor_block = ""
+    if anchor:
+        anchor_block = (
+            f"\nGlobal Style Anchor:\n"
+            f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+            f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+            f"- Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+            f"- Lighting: {anchor.get('lighting','')}\n"
+            f"- Camera: {anchor.get('camera','')}\n"
+            f"- Texture: {anchor.get('texture','')}\n"
+        )
+
     return f"""<context>
 Topic: {topic}
 Content Type: {content_type}
@@ -247,10 +208,7 @@ Visual Style: {tool_category}
 
 Research/Story Summary:
 {research_summary}
-
-Style Keywords: {', '.join(tool_vocab['style_keywords'])}
-Camera Styles: {', '.join(tool_vocab['camera_styles'])}
-Mood Keywords: {', '.join(tool_vocab['mood_keywords'])}
+{anchor_block}
 </context>
 
 <pattern_interrupt_rules>
@@ -311,19 +269,30 @@ def _build_full_script_prompt(
     target_audience: str,
     tool_category: str,
     is_fictional: bool,
+    anchor: dict | None = None,
 ) -> str:
     """Build prompt for complete script generation in one call.
     
     Reference: prompting_Docs.md - Comprehensive prompt with all context.
     """
-    tool_vocab = TOOL_VISUAL_VOCABULARY.get(tool_category, TOOL_VISUAL_VOCABULARY["surreal_realism"])
-    
     archetypes = HOOK_ARCHETYPE_MAP.get(intent_type, [HookArchetype.TEACHER])
     recommended_archetype = archetypes[0].value
     
     scene_count = max(2, math.ceil(duration_seconds / 4))
     content_type = "fictional/creative" if is_fictional else "factual/educational"
     
+    anchor_block = ""
+    if anchor:
+        anchor_block = (
+            f"\nGlobal Style Anchor:\n"
+            f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+            f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+            f"- Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+            f"- Lighting: {anchor.get('lighting','')}\n"
+            f"- Camera: {anchor.get('camera','')}\n"
+            f"- Texture: {anchor.get('texture','')}\n"
+        )
+
     return f"""<context>
 # Video Parameters
 - Topic: {topic}
@@ -336,11 +305,7 @@ def _build_full_script_prompt(
 
 # Research/Story Content
 {research_summary}
-
-# Tool Visual Vocabulary
-Style Keywords: {', '.join(tool_vocab['style_keywords'])}
-Camera Styles: {', '.join(tool_vocab['camera_styles'])}
-Mood Keywords: {', '.join(tool_vocab['mood_keywords'])}
+{anchor_block}
 </context>
 
 <viral_structure>
@@ -543,6 +508,7 @@ class ScriptWriterAgent:
     def __init__(self):
         """Initialize Script Writer Agent."""
         self.gemini = get_gemini_service()
+        self.prompt_builder = get_prompt_builder()
         logger.info("ScriptWriterAgent initialized")
     
     async def generate_script(
@@ -554,6 +520,8 @@ class ScriptWriterAgent:
         tone: str = "informative",
         target_audience: str = "general",
         tool_category: str = "surreal_realism",
+        *,
+        prebuilt_prompt: Optional[str] = None,
     ) -> ScriptOutput:
         """
         Generate a complete viral script.
@@ -576,17 +544,21 @@ class ScriptWriterAgent:
         start_time = time.time()
         
         research_summary, is_fictional = _extract_research_summary(research_data)
-        
-        prompt = _build_full_script_prompt(
-            topic=topic,
-            duration_seconds=duration_seconds,
-            research_summary=research_summary,
-            intent_type=intent_type,
-            tone=tone,
-            target_audience=target_audience,
-            tool_category=tool_category,
-            is_fictional=is_fictional,
-        )
+
+        if prebuilt_prompt and prebuilt_prompt.strip():
+            prompt = prebuilt_prompt
+            logger.info("Using tool template for script generation")
+        else:
+            prompt = _build_full_script_prompt(
+                topic=topic,
+                duration_seconds=duration_seconds,
+                research_summary=research_summary,
+                intent_type=intent_type,
+                tone=tone,
+                target_audience=target_audience,
+                tool_category=tool_category,
+                is_fictional=is_fictional,
+            )
         
         system_instruction = _build_system_instruction()
         
@@ -646,7 +618,58 @@ class ScriptWriterAgent:
         tool_category = selected_tool.get("category", "surreal_realism")
         if hasattr(tool_category, "value"):
             tool_category = tool_category.value
-        
+
+        # Try template-based prompt rendering first
+        prebuilt_prompt = None
+        try:
+            template = (selected_tool or {}).get("script_prompt_template")
+            if template:
+                logger.info("Retrieved script_prompt_template from selected_tool")
+                rs, _ = _extract_research_summary(research_data)
+                anchor = state.get("global_style_anchor") or {}
+                context = {
+                    "topic": topic,
+                    "tone": tone,
+                    "duration": duration_seconds,
+                    "duration_seconds": duration_seconds,
+                    "intent_type": intent_type,
+                    "target_audience": target_audience,
+                    "research_summary": rs,
+                    "tool_category": selected_tool.get("category", ""),
+                    "tool_name": selected_tool.get("tool_name", ""),
+                    # Global style anchor
+                    "global_color_palette": ", ".join(anchor.get("color_palette", [])[:6]),
+                    "global_materials": ", ".join(anchor.get("materials", [])[:6]),
+                    "global_motion_language": ", ".join(anchor.get("motion_language", [])[:6]),
+                    "global_lighting": anchor.get("lighting", ""),
+                    "global_camera": anchor.get("camera", ""),
+                    "global_texture": anchor.get("texture", ""),
+                }
+                rr = self.prompt_builder.render(
+                    template,
+                    context,
+                    required=["topic", "tone", "duration"],
+                    min_words=50,
+                    fallback_prompt_builder=lambda: _build_full_script_prompt(
+                        topic=topic,
+                        duration_seconds=duration_seconds,
+                        research_summary=rs,
+                        intent_type=intent_type,
+                        tone=tone,
+                        target_audience=target_audience,
+                        tool_category=selected_tool.get("category", "surreal_realism"),
+                        is_fictional=False,
+                        anchor=anchor,
+                    ),
+                )
+                prebuilt_prompt = rr.prompt
+                if rr.fallback_used:
+                    logger.warning("Script template fallback used due to missing/invalid template")
+            else:
+                logger.info("No script_prompt_template found; using fallback prompt builder")
+        except Exception as e:
+            logger.warning(f"Script template rendering failed: {e}; using fallback")
+
         script = await self.generate_script(
             topic=topic,
             duration_seconds=duration_seconds,
@@ -655,6 +678,7 @@ class ScriptWriterAgent:
             tone=tone,
             target_audience=target_audience,
             tool_category=tool_category,
+            prebuilt_prompt=prebuilt_prompt,
         )
         
         return {

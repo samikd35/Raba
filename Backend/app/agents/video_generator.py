@@ -35,6 +35,7 @@ from app.models.video import (
     VideoSegmentType,
 )
 from app.services.veo import get_veo_service, VeoServiceError
+from app.services.prompt_builder import get_prompt_builder
 from app.services.supabase import get_supabase_client
 from app.utils.logging import get_logger
 
@@ -43,66 +44,6 @@ logger = get_logger(__name__)
 MAX_SEGMENT_DURATION = 8
 EXTENSION_DURATION = 7
 MAX_REFERENCE_IMAGES = 3
-
-TOOL_VIDEO_VOCABULARY = {
-    "surreal_realism": {
-        "style_keywords": [
-            "photorealistic", "cinematic", "hyperreal",
-            "flowing liquid-glass aesthetic", "impossible physics",
-            "dreamlike atmosphere", "tangible phenomenon"
-        ],
-        "camera_movements": [
-            "slow dolly", "smooth tracking", "floating perspective",
-            "subtle push-in", "cinematic crane", "gentle orbit"
-        ],
-        "audio_cues": [
-            "ambient atmospheric sounds", "subtle ethereal music",
-            "gentle whooshing", "resonant bass tones", "soft reverb"
-        ],
-        "lighting": [
-            "soft volumetric lighting", "golden hour glow",
-            "subtle rim lighting", "natural diffused light"
-        ]
-    },
-    "high_octane_anime": {
-        "style_keywords": [
-            "Sakuga-style animation", "dynamic action",
-            "ink-splash effects", "speed lines", "impact frames",
-            "calligraphic combat", "high-energy aesthetic"
-        ],
-        "camera_movements": [
-            "rapid cuts", "dynamic tracking", "whip pan",
-            "dramatic zoom", "rotating camera", "impact shake"
-        ],
-        "audio_cues": [
-            "intense orchestral", "dramatic sound effects",
-            "swooshing impacts", "epic crescendo", "battle cries"
-        ],
-        "lighting": [
-            "dramatic backlighting", "high contrast",
-            "energy glow effects", "stark shadows"
-        ]
-    },
-    "stylized_3d": {
-        "style_keywords": [
-            "clean 3D render", "isometric perspective",
-            "miniature diorama", "tilt-shift effect",
-            "stylized materials", "low-poly charm"
-        ],
-        "camera_movements": [
-            "orbital rotation", "smooth dolly", "subtle tilt-shift",
-            "steady pan", "gentle zoom", "floating overview"
-        ],
-        "audio_cues": [
-            "clean electronic", "subtle clicks and beeps",
-            "ambient informative tone", "gentle chimes", "soft synth"
-        ],
-        "lighting": [
-            "soft ambient lighting", "studio lighting",
-            "even illumination", "gentle shadows"
-        ]
-    }
-}
 
 ASPECT_RATIO_MAP = {
     "9:16": VideoAspectRatio.PORTRAIT_9_16,
@@ -203,18 +144,27 @@ def select_reference_images(
         logger.warning("No generated images available for video generation")
         return []
     
+    # Filter out failed uploads
+    valid_images = [img for img in generated_images if not (isinstance(img, str) and img.startswith("upload_failed://"))]
+    if len(valid_images) < len(generated_images):
+        logger.warning(f"Filtered out {len(generated_images) - len(valid_images)} failed upload(s)")
+    
+    if not valid_images:
+        logger.warning("No valid generated images after filtering failed uploads")
+        return []
+    
     # Always use all images if we have max_count or fewer
-    if len(generated_images) <= max_count:
-        selected = generated_images[:max_count]
+    if len(valid_images) <= max_count:
+        selected = valid_images[:max_count]
         logger.info(f"Using all {len(selected)} generated images as references for Veo")
     else:
         # If more than max_count, select strategically: first, middle, last
-        selected = [generated_images[0]]
+        selected = [valid_images[0]]
         if max_count >= 2:
-            selected.append(generated_images[-1])
-        if max_count >= 3 and len(generated_images) > 2:
-            mid_idx = len(generated_images) // 2
-            selected.insert(1, generated_images[mid_idx])
+            selected.append(valid_images[-1])
+        if max_count >= 3 and len(valid_images) > 2:
+            mid_idx = len(valid_images) // 2
+            selected.insert(1, valid_images[mid_idx])
         logger.info(f"Selected {len(selected)} images from {len(generated_images)} total (first, middle, last)")
     
     logger.info(f"Reference images for Veo: {len(selected)} images selected")
@@ -231,6 +181,7 @@ def build_video_prompt(
     segment_info: dict,
     is_extension: bool = False,
     previous_segment_end: Optional[str] = None,
+    anchor: Optional[dict] = None,
 ) -> str:
     """Build Veo prompt from script and tool vocabulary.
     
@@ -247,15 +198,18 @@ def build_video_prompt(
         
     Reference: veo_prompting_guide.md - Anatomy of a Veo prompt
     """
-    vocab = TOOL_VIDEO_VOCABULARY.get(tool_category, TOOL_VIDEO_VOCABULARY["surreal_realism"])
-    
     parts = []
     
     if is_extension and previous_segment_end:
         parts.append(f"[CONTINUATION] Seamlessly continue from: {previous_segment_end}\n\n")
     
-    parts.append(f"[STYLE] {', '.join(vocab['style_keywords'][:4])}\n")
-    parts.append(f"[LIGHTING] {', '.join(vocab['lighting'][:2])}\n\n")
+    # Style and lighting are handled through anchor if available, otherwise omitted
+    # The tool category and scene descriptions provide sufficient style context
+    if anchor:
+        if anchor.get("color_palette"):
+            parts.append(f"[STYLE] {', '.join(anchor.get('color_palette', [])[:4])}\n")
+        if anchor.get("lighting"):
+            parts.append(f"[LIGHTING] {anchor.get('lighting', '')}\n\n")
     
     hook = script_output.get("hook", {})
     scenes = script_output.get("scenes", [])
@@ -272,7 +226,15 @@ def build_video_prompt(
             parts.append(f"Dialogue: \"{hook_text}\"\n")
             if hook_visual:
                 parts.append(f"Visual: {hook_visual}\n")
-            parts.append(f"Camera: {vocab['camera_movements'][0]}\n\n")
+            cam = ""
+            if anchor and anchor.get("motion_language"):
+                cam = ", ".join(anchor.get("motion_language", [])[:2])
+            elif anchor and anchor.get("camera"):
+                cam = anchor.get("camera")
+            if cam:
+                parts.append(f"Camera: {cam}\n\n")
+            else:
+                parts.append("\n")
     
     relevant_scenes = []
     for scene in scenes:
@@ -286,7 +248,7 @@ def build_video_prompt(
         scene_num = scene.get("scene_number", i + 1)
         description = scene.get("description", "")
         dialogue = scene.get("dialogue", "")
-        camera = scene.get("camera_direction", vocab['camera_movements'][min(i, len(vocab['camera_movements']) - 1)])
+        camera = scene.get("camera_direction", (", ".join(anchor.get("motion_language", [])[:2]) if anchor and anchor.get("motion_language") else ""))
         mood = scene.get("mood", "")
         
         parts.append(f"[SCENE {scene_num}]\n")
@@ -309,8 +271,7 @@ def build_video_prompt(
                 parts.append(f"Visual: {cta_visual}\n")
             parts.append("\n")
     
-    parts.append(f"[AUDIO] {', '.join(vocab['audio_cues'][:3])}\n")
-    parts.append(f"Synchronize all dialogue exactly with visuals.\n\n")
+    parts.append(f"Synchronize dialogue with visuals precisely.\n\n")
     
     parts.append("[REQUIREMENTS]\n")
     parts.append("- Maintain visual consistency throughout\n")
@@ -330,6 +291,7 @@ def build_extension_prompt(
     tool_category: str,
     segment_info: dict,
     previous_end_description: str,
+    anchor: Optional[dict] = None,
 ) -> str:
     """Build continuation prompt for video extension.
     
@@ -349,6 +311,7 @@ def build_extension_prompt(
         segment_info=segment_info,
         is_extension=True,
         previous_segment_end=previous_end_description,
+        anchor=anchor,
     )
 
 
@@ -363,6 +326,7 @@ class VideoGeneratorAgent:
         """Initialize the Video Generator Agent."""
         self.veo_service = get_veo_service()
         self.supabase = get_supabase_client()
+        self.prompt_builder = get_prompt_builder()
         logger.info("VideoGeneratorAgent initialized")
     
     async def run(self, state: VideoGenerationState) -> dict[str, Any]:
@@ -431,13 +395,84 @@ class VideoGeneratorAgent:
             
             segment_plans = plan_video_segments(duration_seconds)
             
-            initial_prompt = build_video_prompt(
-                script_output=script_output,
-                tool_category=tool_category,
-                topic=topic,
-                segment_info=segment_plans[0],
-                is_extension=False,
-            )
+            # Template-based prompt if available
+            initial_prompt = None
+            try:
+                tpl = (state.get("selected_tool") or {}).get("video_prompt_template")
+                if tpl:
+                    logger.info("Rendering video_prompt_template for initial segment")
+                    script_text = self._format_script_for_template(script_output)
+                    ctx = {
+                        "script": script_text,
+                        "duration": duration_seconds,
+                        "duration_seconds": duration_seconds,
+                        "tool_category": tool_category,
+                        "tool_name": (state.get("selected_tool") or {}).get("tool_name", ""),
+                        "segment_info": segment_plans[0],
+                    }
+                    rr = self.prompt_builder.render(
+                        tpl,
+                        ctx,
+                        required=["script", "duration"],
+                        min_words=50,
+                        fallback_prompt_builder=lambda: build_video_prompt(
+                            script_output=script_output,
+                            tool_category=tool_category,
+                            topic=topic,
+                            segment_info=segment_plans[0],
+                            is_extension=False,
+                        ),
+                    )
+                    initial_prompt = rr.prompt
+                    if rr.fallback_used:
+                        logger.warning("Video template fallback used for initial segment")
+                if not initial_prompt:
+                    initial_prompt = build_video_prompt(
+                        script_output=script_output,
+                        tool_category=tool_category,
+                        topic=topic,
+                        segment_info=segment_plans[0],
+                        is_extension=False,
+                        anchor=state.get("global_style_anchor") or None,
+                    )
+            except Exception as e:
+                logger.warning(f"Initial video template rendering failed: {e}; using fallback")
+                initial_prompt = build_video_prompt(
+                    script_output=script_output,
+                    tool_category=tool_category,
+                    topic=topic,
+                    segment_info=segment_plans[0],
+                    is_extension=False,
+                )
+
+            # Apply user-controlled flags to prompt explicitly
+            if not enable_audio:
+                initial_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
+            if not state.get("enable_subtitles", False):
+                initial_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+            # Append global style anchor details to increase consistency (including realistic videos)
+            try:
+                anchor = state.get("global_style_anchor") or {}
+                if anchor:
+                    initial_prompt += (
+                        "\n[GLOBAL STYLE ANCHOR]\n"
+                        f"Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+                        f"Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+                        f"Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+                        f"Lighting: {anchor.get('lighting','')}\n"
+                        f"Camera: {anchor.get('camera','')}\n"
+                        f"Texture: {anchor.get('texture','')}\n"
+                    )
+            except Exception:
+                pass
+            # Append character reference URLs if available
+            try:
+                char_sheet = state.get("character_reference_sheet") or {}
+                ref_urls = [r.get("url") for r in (char_sheet.get("reference_images") or []) if isinstance(r, dict) and r.get("url")]
+                if ref_urls:
+                    initial_prompt += "\n[REFERENCE IMAGES] Use character consistency from: " + ", ".join(ref_urls[:4])
+            except Exception:
+                pass
             
             extension_prompts = []
             for i, seg_plan in enumerate(segment_plans[1:], 1):
@@ -446,14 +481,128 @@ class VideoGeneratorAgent:
                 if prev_scenes:
                     prev_idx = min(i - 1, len(prev_scenes) - 1)
                     prev_end = prev_scenes[prev_idx].get("description", "scene continues")
-                
-                ext_prompt = build_extension_prompt(
-                    script_output=script_output,
-                    tool_category=tool_category,
-                    segment_info=seg_plan,
-                    previous_end_description=prev_end,
-                )
-                extension_prompts.append(ext_prompt)
+                try:
+                    tpl = (state.get("selected_tool") or {}).get("video_prompt_template")
+                    if tpl:
+                        logger.info(f"Rendering video_prompt_template for extension {i}")
+                        script_text = self._format_script_for_template(script_output)
+                        ctx = {
+                            "script": script_text,
+                            "duration": duration_seconds,
+                            "duration_seconds": duration_seconds,
+                            "tool_category": tool_category,
+                            "tool_name": (state.get("selected_tool") or {}).get("tool_name", ""),
+                            "segment_info": seg_plan,
+                            "previous_segment_end": prev_end,
+                        }
+                        rr = self.prompt_builder.render(
+                            tpl,
+                            ctx,
+                            required=["script", "duration"],
+                            min_words=50,
+                            fallback_prompt_builder=lambda: build_extension_prompt(
+                                script_output=script_output,
+                                tool_category=tool_category,
+                                segment_info=seg_plan,
+                                previous_end_description=prev_end,
+                            ),
+                        )
+                        ext_prompt = rr.prompt
+                        if not enable_audio:
+                            ext_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
+                        if not state.get("enable_subtitles", False):
+                            ext_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+                        try:
+                            anchor = state.get("global_style_anchor") or {}
+                            if anchor:
+                                ext_prompt += (
+                                    "\n[GLOBAL STYLE ANCHOR]\n"
+                                    f"Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+                                    f"Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+                                    f"Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+                                    f"Lighting: {anchor.get('lighting','')}\n"
+                                    f"Camera: {anchor.get('camera','')}\n"
+                                    f"Texture: {anchor.get('texture','')}\n"
+                                )
+                        except Exception:
+                            pass
+                        try:
+                            char_sheet = state.get("character_reference_sheet") or {}
+                            ref_urls = [r.get("url") for r in (char_sheet.get("reference_images") or []) if isinstance(r, dict) and r.get("url")]
+                            if ref_urls:
+                                ext_prompt += "\n[REFERENCE IMAGES] Use character consistency from: " + ", ".join(ref_urls[:4])
+                        except Exception:
+                            pass
+                        extension_prompts.append(ext_prompt)
+                    else:
+                        ext_prompt = build_extension_prompt(
+                            script_output=script_output,
+                            tool_category=tool_category,
+                            segment_info=seg_plan,
+                            previous_end_description=prev_end,
+                            anchor=state.get("global_style_anchor") or None,
+                        )
+                        if not enable_audio:
+                            ext_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
+                        if not state.get("enable_subtitles", False):
+                            ext_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+                        try:
+                            anchor = state.get("global_style_anchor") or {}
+                            if anchor:
+                                ext_prompt += (
+                                    "\n[GLOBAL STYLE ANCHOR]\n"
+                                    f"Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+                                    f"Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+                                    f"Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+                                    f"Lighting: {anchor.get('lighting','')}\n"
+                                    f"Camera: {anchor.get('camera','')}\n"
+                                    f"Texture: {anchor.get('texture','')}\n"
+                                )
+                        except Exception:
+                            pass
+                        try:
+                            char_sheet = state.get("character_reference_sheet") or {}
+                            ref_urls = [r.get("url") for r in (char_sheet.get("reference_images") or []) if isinstance(r, dict) and r.get("url")]
+                            if ref_urls:
+                                ext_prompt += "\n[REFERENCE IMAGES] Use character consistency from: " + ", ".join(ref_urls[:4])
+                        except Exception:
+                            pass
+                        extension_prompts.append(ext_prompt)
+                except Exception as e:
+                    logger.warning(f"Extension video template rendering failed for segment {i}: {e}; using fallback")
+                    ext_prompt = build_extension_prompt(
+                        script_output=script_output,
+                        tool_category=tool_category,
+                        segment_info=seg_plan,
+                        previous_end_description=prev_end,
+                        anchor=state.get("global_style_anchor") or None,
+                    )
+                    if not enable_audio:
+                        ext_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
+                    if not state.get("enable_subtitles", False):
+                        ext_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+                    try:
+                        anchor = state.get("global_style_anchor") or {}
+                        if anchor:
+                            ext_prompt += (
+                                "\n[GLOBAL STYLE ANCHOR]\n"
+                                f"Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
+                                f"Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
+                                f"Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
+                                f"Lighting: {anchor.get('lighting','')}\n"
+                                f"Camera: {anchor.get('camera','')}\n"
+                                f"Texture: {anchor.get('texture','')}\n"
+                            )
+                    except Exception:
+                        pass
+                    try:
+                        char_sheet = state.get("character_reference_sheet") or {}
+                        ref_urls = [r.get("url") for r in (char_sheet.get("reference_images") or []) if isinstance(r, dict) and r.get("url")]
+                        if ref_urls:
+                            ext_prompt += "\n[REFERENCE IMAGES] Use character consistency from: " + ", ".join(ref_urls[:4])
+                    except Exception:
+                        pass
+                    extension_prompts.append(ext_prompt)
             
             if len(segment_plans) == 1:
                 # Use retry wrapper for initial single-segment to handle 429 and other transient errors
@@ -574,6 +723,7 @@ class VideoGeneratorAgent:
             state_update = {
                 "video_output": output.model_dump(),
                 "final_video_url": video_url,
+                "clean_video_url": video_url,
                 "video_metadata": {
                     "duration_seconds": duration_seconds,
                     "segments": len(segments),
@@ -737,6 +887,50 @@ class VideoGeneratorAgent:
             
         except Exception as e:
             logger.error(f"Database persistence failed: {e}")
+    
+    def _format_script_for_template(self, script_output: dict) -> str:
+        """Format structured script output into a compact textual form for templates.
+
+        Includes hook, scenes, and CTA with timing, dialogue, and visual notes.
+        """
+        parts: list[str] = []
+        if not script_output:
+            return ""
+
+        hook = script_output.get("hook") or {}
+        if hook:
+            text = hook.get("text") or hook.get("script") or ""
+            vis = hook.get("visual_direction", "")
+            if text:
+                parts.append(f"HOOK: {text}")
+            if vis:
+                parts.append(f"Hook Visual: {vis}")
+
+        scenes = script_output.get("scenes") or []
+        for s in scenes:
+            num = s.get("scene_number", "?")
+            desc = s.get("description", "")
+            dia = s.get("dialogue", "")
+            cam = s.get("camera_direction", "")
+            mood = s.get("mood", "")
+            parts.append(f"SCENE {num}: {desc}")
+            if dia:
+                parts.append(f"Dialogue: {dia}")
+            if cam:
+                parts.append(f"Camera: {cam}")
+            if mood:
+                parts.append(f"Mood: {mood}")
+
+        cta = script_output.get("call_to_action") or {}
+        if cta:
+            text = cta.get("text") or cta.get("script") or ""
+            vis = cta.get("visual_direction", "")
+            if text:
+                parts.append(f"CTA: {text}")
+            if vis:
+                parts.append(f"CTA Visual: {vis}")
+
+        return "\n".join(parts)
 
 
 async def video_generator_node(state: VideoGenerationState) -> dict[str, Any]:
@@ -750,3 +944,4 @@ async def video_generator_node(state: VideoGenerationState) -> dict[str, Any]:
     """
     agent = VideoGeneratorAgent()
     return await agent.run(state)
+    

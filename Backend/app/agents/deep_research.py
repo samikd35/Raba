@@ -150,19 +150,32 @@ class DeepResearchAgent:
             num_images=3,
         )
         
-        try:
-            research_output, research_images = await asyncio.gather(
-                research_task,
-                image_task,
-            )
-        except DeepResearchTimeoutError:
+        # Use return_exceptions=True to avoid losing image_task result if research times out
+        results = await asyncio.gather(
+            research_task,
+            image_task,
+            return_exceptions=True,
+        )
+        
+        research_result, images_result = results
+        
+        if isinstance(research_result, DeepResearchTimeoutError):
             logger.warning("Deep research timed out, using fallback")
             research_output = ResearchOutput(
                 executive_summary=f"Research on: {topic}",
                 strategy_used=ResearchStrategy.FACTUAL,
                 is_fictional=False,
             )
-            research_images = await image_task
+        elif isinstance(research_result, Exception):
+            raise research_result
+        else:
+            research_output = research_result
+        
+        if isinstance(images_result, Exception):
+            logger.warning(f"Image search failed: {images_result}, using empty list")
+            research_images = []
+        else:
+            research_images = images_result
         
         image_urls = [img.storage_url for img in research_images]
         research_output.research_images = research_images

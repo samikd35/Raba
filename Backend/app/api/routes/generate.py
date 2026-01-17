@@ -173,7 +173,7 @@ async def create_workflow_with_image(
     resolution: ResolutionEnum = Form(default=ResolutionEnum.FULL_HD),
     category: CategoryEnum = Form(default=CategoryEnum.AUTO),
     hitl_mode: HITLModeEnum = Form(default=HITLModeEnum.AUTO),
-    enable_audio: bool = Form(default=True),
+    enable_audio: bool = Form(default=False),
     enable_subtitles: bool = Form(default=False),
     video_model: VideoModelOption = Form(default=VideoModelOption.VEO_3_1, description="Veo model: veo_3_1 or veo_3_1_fast"),
     tool_id: Optional[str] = Form(default=None, description="Optional specific tool_id under the selected category"),
@@ -192,7 +192,7 @@ async def create_workflow_with_image(
         resolution: Video resolution (default: 1080p)
         category: Visual style category (default: auto)
         hitl_mode: Human-in-the-loop mode (default: auto)
-        enable_audio: Generate audio (default: true)
+        enable_audio: Generate audio (default: false; requires explicit enable)
         enable_subtitles: Generate subtitles (default: false)
         reference_image: Optional reference image file
         

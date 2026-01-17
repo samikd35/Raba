@@ -59,6 +59,11 @@ class VideoGenerationState(TypedDict, total=False):
     video_segments: Optional[list[dict[str, Any]]]
     video_output: Optional[dict[str, Any]]
     final_video_url: Optional[str]
+    clean_video_url: Optional[str]
+    subtitle_overlays: Optional[list[dict[str, Any]]]
+    character_reference_sheet: Optional[dict[str, Any]]
+    visual_validation: Optional[dict[str, Any]]
+    global_style_anchor: Optional[dict[str, Any]]
     
     status: Optional[str]
     final_output: Optional[dict[str, Any]]
@@ -88,7 +93,7 @@ def create_initial_state(
     resolution: str = "1080p",
     category: str = "auto",
     hitl_mode: str = "auto",
-    enable_audio: bool = True,
+    enable_audio: bool = False,
     enable_subtitles: bool = False,
     user_reference_image_url: Optional[str] = None,
 ) -> VideoGenerationState:

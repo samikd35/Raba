@@ -335,7 +335,7 @@ class TestVideoModels:
         assert config.model == VideoModel.VEO_3_1
         assert config.aspect_ratio == VideoAspectRatio.PORTRAIT_9_16
         assert config.resolution == VideoResolution.RES_720P
-        assert config.enable_audio is True
+        assert config.enable_audio is False
         assert config.max_retries == 3
     
     def test_video_generation_config_resolution_for_extension(self):

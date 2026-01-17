@@ -130,6 +130,10 @@ class ToolMetadata(BaseModel):
         le=1,
         description="Quality score (0-1)"
     )
+    script_prompt_template: Optional[str] = Field(
+        default=None,
+        description="Template for script generation prompts"
+    )
     video_prompt_template: Optional[str] = Field(
         default=None,
         description="Template for video generation prompts"
@@ -574,6 +578,56 @@ class ToolListResponse(BaseModel):
     total: int = Field(..., description="Total count")
     limit: int = Field(..., description="Page size")
     offset: int = Field(..., description="Page offset")
+
+
+# =============================================================================
+# Phase 2: Prompt Management System Models
+# =============================================================================
+
+class PromptUpdateType(str, Enum):
+    ALL = "all"
+    SCRIPT_ONLY = "script_only"
+    IMAGE_ONLY = "image_only"
+    VIDEO_ONLY = "video_only"
+    SCRIPT_AND_IMAGE = "script_and_image"
+    SCRIPT_AND_VIDEO = "script_and_video"
+    IMAGE_AND_VIDEO = "image_and_video"
+
+
+class PromptTemplates(BaseModel):
+    script_prompt_template: Optional[str] = None
+    image_prompt_template: Optional[str] = None
+    video_prompt_template: Optional[str] = None
+
+
+class PromptBulkUpdateRequest(BaseModel):
+    tool_ids: Optional[list[str]] = Field(default=None, description="Tool IDs to update. Ignored when update_type is 'all'")
+    update_type: PromptUpdateType = Field(..., description="Which templates to update. Use 'all' to update all tools in database")
+    improvement_reason: Optional[str] = Field(default="System-wide prompt quality improvement to match latest standards", description="Reason for bulk improvement")
+    prompts: Optional[PromptTemplates] = Field(default=None, description="Templates to apply when not using AI enhancement")
+    use_ai_enhancement: bool = Field(default=True, description="Use Gemini to enhance prompts based on tool context. Must be True when update_type is 'all'")
+
+
+class PromptBulkUpdateResponse(BaseModel):
+    updated_count: int
+    failed_updates: list[dict[str, Any]]
+    updated_tools: list[ToolResponse]
+    improvement_summary: Optional[str] = None
+    details: list[dict[str, Any]] = Field(default_factory=list, description="Per-tool processing details")
+
+
+class ToolPromptUpdateRequest(BaseModel):
+    update_type: PromptUpdateType = Field(..., description="Which templates to update")
+    improvement_reason: str = Field(..., description="Reason for improvement")
+    prompts: Optional[PromptTemplates] = Field(default=None, description="Templates to apply when not using AI enhancement")
+    use_ai_enhancement: bool = Field(default=False)
+
+
+class ToolPromptUpdateResponse(BaseModel):
+    tool_id: str
+    updated_templates: dict[str, bool]
+    improvement_summary: Optional[str] = None
+    new_version: int
 
 
 class ToolExecutionRequest(BaseModel):

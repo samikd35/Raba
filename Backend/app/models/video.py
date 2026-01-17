@@ -138,7 +138,7 @@ class VideoGenerationConfig(BaseModel):
         description="Target total video duration"
     )
     enable_audio: bool = Field(
-        default=True,
+        default=False,
         description="Enable native audio generation"
     )
     negative_prompt: Optional[str] = Field(

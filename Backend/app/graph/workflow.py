@@ -20,6 +20,9 @@ NODE_DEEP_RESEARCH = "deep_research"
 NODE_SCRIPT_WRITER = "script_writer"
 NODE_IMAGE_GENERATOR = "image_generator"
 NODE_VIDEO_GENERATOR = "video_generator"
+NODE_TRIM_AGENT = "trim_agent"
+NODE_OVERLAY_GENERATOR = "overlay_generator"
+NODE_VIDEO_COMPOSITOR = "video_compositor"
 NODE_OUTPUT_PROCESSOR = "output_processor"
 
 NODE_HITL_TOOL_GATE = "hitl_tool_gate"
@@ -29,6 +32,9 @@ NODE_HITL_IMAGE_GATE = "hitl_image_gate"
 NODE_HITL_VIDEO_GATE = "hitl_video_gate"
 
 NODE_ERROR_HANDLER = "error_handler"
+NODE_VISUAL_VALIDATOR = "visual_logic_validator"
+NODE_CHARACTER_REFERENCE = "character_reference"
+NODE_GLOBAL_STYLE_ANCHOR = "global_style_anchor"
 
 
 def route_after_intent_tool_selection(
@@ -80,7 +86,7 @@ def route_after_research(
 
 def route_after_script(
     state: VideoGenerationState,
-) -> Literal["hitl_script_gate", "image_generator", "error_handler"]:
+) -> Literal["hitl_script_gate", "visual_logic_validator", "error_handler"]:
     """Route after Script Writer agent."""
     logger.info("Routing after Script Writer...")
     
@@ -91,7 +97,87 @@ def route_after_script(
         logger.info("Manual mode - routing to HITL script gate")
         return NODE_HITL_SCRIPT_GATE
     
+    logger.info("Routing to Visual Logic Validator")
+    return NODE_VISUAL_VALIDATOR
+
+
+def route_after_visual_validator(
+    state: VideoGenerationState,
+) -> Literal["script_writer", "global_style_anchor", "error_handler"]:
+    """Route after visual logic validation.
+    
+    Prevents infinite loops by tracking revision attempts and enforcing a max limit.
+    
+    CRITICAL: If both script_output and visual_validation exist (both nodes will skip),
+    and requires_revision=True, we must break the loop to prevent infinite recursion.
+    """
+    if state.get("error"):
+        return NODE_ERROR_HANDLER
+    vv = state.get("visual_validation") or {}
+    
+    # Prevent infinite loops: track revision attempts and enforce max limit
+    MAX_SCRIPT_REVISIONS = 2
+    revision_counts = state.get("regeneration_counts", {})
+    script_revision_count = revision_counts.get("script_validation", 0)
+    
+    if vv.get("requires_revision"):
+        # CRITICAL FIX: If both nodes will skip (both outputs exist), we're in a continue scenario.
+        # In this case, if we've already attempted revisions (count > 0) or we're at the limit,
+        # we must break the loop by routing to Global Style Anchor.
+        has_script = bool(state.get("script_output"))
+        has_validation = bool(state.get("visual_validation"))
+        
+        if has_script and has_validation:
+            # Both nodes will skip - this is a continue scenario
+            if script_revision_count >= MAX_SCRIPT_REVISIONS:
+                logger.warning(
+                    f"[CONTINUE] Revision limit reached ({script_revision_count}/{MAX_SCRIPT_REVISIONS}). "
+                    "Both nodes will skip; routing to Global Style Anchor to break loop."
+                )
+                return NODE_GLOBAL_STYLE_ANCHOR
+            elif script_revision_count > 0:
+                # We've already attempted at least one revision, and both nodes will skip.
+                # This means we're stuck in a loop. Break it by routing to Global Style Anchor.
+                logger.warning(
+                    f"[CONTINUE] Both nodes will skip with requires_revision=True and count={script_revision_count}. "
+                    "Breaking loop by routing to Global Style Anchor."
+                )
+                return NODE_GLOBAL_STYLE_ANCHOR
+        
+        if script_revision_count >= MAX_SCRIPT_REVISIONS:
+            logger.warning(
+                f"Script revision limit reached ({script_revision_count}/{MAX_SCRIPT_REVISIONS}). "
+                "Continuing despite validation concerns to prevent infinite loop."
+            )
+            return NODE_GLOBAL_STYLE_ANCHOR
+        logger.info(
+            f"Validation requested revision ({script_revision_count + 1}/{MAX_SCRIPT_REVISIONS}); "
+            "routing back to Script Writer"
+        )
+        return NODE_SCRIPT_WRITER
+    
+    logger.info("Routing to Global Style Anchor")
+    return NODE_GLOBAL_STYLE_ANCHOR
+
+
+def route_after_style_anchor(
+    state: VideoGenerationState,
+) -> Literal["character_reference", "image_generator", "error_handler"]:
+    if state.get("error"):
+        return NODE_ERROR_HANDLER
+    script = state.get("script_output") or {}
+    if script.get("lead_character"):
+        logger.info("Lead character detected; routing to Character Reference")
+        return NODE_CHARACTER_REFERENCE
     logger.info("Routing to Image Generator")
+    return NODE_IMAGE_GENERATOR
+
+
+def route_after_character_reference(
+    state: VideoGenerationState,
+) -> Literal["image_generator", "error_handler"]:
+    if state.get("error"):
+        return NODE_ERROR_HANDLER
     return NODE_IMAGE_GENERATOR
 
 
@@ -114,7 +200,7 @@ def route_after_images(
 
 def route_after_video(
     state: VideoGenerationState,
-) -> Literal["hitl_video_gate", "output_processor", "error_handler"]:
+) -> Literal["hitl_video_gate", "trim_agent", "error_handler"]:
     """Route after Video Generator agent."""
     logger.info("Routing after Video Generator...")
     
@@ -125,8 +211,28 @@ def route_after_video(
         logger.info("Manual mode - routing to HITL video gate")
         return NODE_HITL_VIDEO_GATE
     
+    logger.info("Routing to Trim Agent")
+    return NODE_TRIM_AGENT
+
+
+def route_after_trim(
+    state: VideoGenerationState,
+) -> Literal["overlay_generator", "output_processor", "error_handler"]:
+    if state.get("error"):
+        return NODE_ERROR_HANDLER
+    if state.get("enable_subtitles"):
+        logger.info("Subtitles enabled - routing to Overlay Generator")
+        return NODE_OVERLAY_GENERATOR
     logger.info("Routing to Output Processor")
     return NODE_OUTPUT_PROCESSOR
+
+
+def route_after_overlay(
+    state: VideoGenerationState,
+) -> Literal["video_compositor", "error_handler"]:
+    if state.get("error"):
+        return NODE_ERROR_HANDLER
+    return NODE_VIDEO_COMPOSITOR
 
 
 def route_after_hitl_tool_gate(
@@ -194,8 +300,14 @@ def create_workflow_graph() -> StateGraph:
         intent_tool_selector_node,
         deep_research_node,
         script_writer_node,
+        visual_logic_validator_node,
+        global_style_anchor_node,
+        character_reference_node,
         image_generator_node,
         video_generator_node,
+        trim_agent_node,
+        overlay_generator_node,
+        video_compositor_node,
         output_processor_node,
         error_handler_node,
         hitl_tool_gate_node,
@@ -214,8 +326,14 @@ def create_workflow_graph() -> StateGraph:
     workflow.add_node(NODE_INTENT_TOOL_SELECTOR, intent_tool_selector_node)
     workflow.add_node(NODE_DEEP_RESEARCH, deep_research_node)
     workflow.add_node(NODE_SCRIPT_WRITER, script_writer_node)
+    workflow.add_node(NODE_VISUAL_VALIDATOR, visual_logic_validator_node)
+    workflow.add_node(NODE_GLOBAL_STYLE_ANCHOR, global_style_anchor_node)
+    workflow.add_node(NODE_CHARACTER_REFERENCE, character_reference_node)
     workflow.add_node(NODE_IMAGE_GENERATOR, image_generator_node)
     workflow.add_node(NODE_VIDEO_GENERATOR, video_generator_node)
+    workflow.add_node(NODE_TRIM_AGENT, trim_agent_node)
+    workflow.add_node(NODE_OVERLAY_GENERATOR, overlay_generator_node)
+    workflow.add_node(NODE_VIDEO_COMPOSITOR, video_compositor_node)
     workflow.add_node(NODE_OUTPUT_PROCESSOR, output_processor_node)
     workflow.add_node(NODE_ERROR_HANDLER, error_handler_node)
     
@@ -239,14 +357,20 @@ def create_workflow_graph() -> StateGraph:
     
     workflow.add_conditional_edges(NODE_HITL_RESEARCH_GATE, route_after_hitl_research_gate)
     workflow.add_conditional_edges(NODE_SCRIPT_WRITER, route_after_script)
+    workflow.add_conditional_edges(NODE_VISUAL_VALIDATOR, route_after_visual_validator)
+    workflow.add_conditional_edges(NODE_GLOBAL_STYLE_ANCHOR, route_after_style_anchor)
+    workflow.add_conditional_edges(NODE_CHARACTER_REFERENCE, route_after_character_reference)
     
     workflow.add_conditional_edges(NODE_HITL_SCRIPT_GATE, route_after_hitl_script_gate)
     workflow.add_conditional_edges(NODE_IMAGE_GENERATOR, route_after_images)
     
     workflow.add_conditional_edges(NODE_HITL_IMAGE_GATE, route_after_hitl_image_gate)
     workflow.add_conditional_edges(NODE_VIDEO_GENERATOR, route_after_video)
+    workflow.add_conditional_edges(NODE_TRIM_AGENT, route_after_trim)
+    workflow.add_conditional_edges(NODE_OVERLAY_GENERATOR, route_after_overlay)
     
     workflow.add_conditional_edges(NODE_HITL_VIDEO_GATE, route_after_hitl_video_gate)
+    workflow.add_edge(NODE_VIDEO_COMPOSITOR, NODE_OUTPUT_PROCESSOR)
     workflow.add_edge(NODE_OUTPUT_PROCESSOR, END)
     
     workflow.add_edge(NODE_ERROR_HANDLER, END)

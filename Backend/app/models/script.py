@@ -254,6 +254,14 @@ class ScriptOutput(BaseModel):
         ...,
         description="Call-to-action section"
     )
+    lead_character: Optional[str] = Field(
+        default=None,
+        description="Optional lead character name for consistency"
+    )
+    lead_character_description: Optional[str] = Field(
+        default=None,
+        description="Optional description for the lead character"
+    )
     
     viral_metrics: ViralMetrics = Field(
         default_factory=ViralMetrics,
