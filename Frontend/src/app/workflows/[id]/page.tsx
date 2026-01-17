@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PipelineStepper } from '@/components/pipeline-stepper'
 import { StatusBadge } from '@/components/status-badge'
-import { ChevronLeft, RefreshCw, Trash2, Download, ExternalLink, Zap, FileText, Image as ImageIcon, Video, Search, Recycle } from 'lucide-react'
+import { ChevronLeft, RefreshCw, Trash2, Download, ExternalLink, Zap, FileText, Image as ImageIcon, Video, Search, Recycle, Users, Play } from 'lucide-react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
@@ -60,6 +60,7 @@ export default function WorkflowDetailPage() {
     const workflowId = params.id as string
     const { data: workflow, isLoading, error, refetch } = useWorkflow(workflowId)
     const [activeStep, setActiveStep] = useState<string | null>(null)
+    const [isContinuing, setIsContinuing] = useState(false)
 
     // All hooks must be called before any conditional returns
     const imageUrls = useMemo(() => getImageUrls(workflow?.generated_images), [workflow?.generated_images])
@@ -117,9 +118,15 @@ export default function WorkflowDetailPage() {
             meta: workflow?.script_output ? `Viral Score: ${workflow.script_output.viral_score}` : undefined
         },
         {
+            id: 'character',
+            label: 'Character',
+            status: workflow?.character_reference_sheet ? 'completed' : (workflow?.script_output && workflow?.current_hitl_gate === 'character_reference') ? 'waiting' : (workflow?.script_output && workflow?.status === 'running') ? 'running' : 'pending',
+            meta: workflow?.character_reference_sheet ? `${workflow.character_reference_sheet.reference_images?.length || 0} views` : undefined
+        },
+        {
             id: 'image',
             label: 'Images',
-            status: imageUrls.length > 0 ? 'completed' : (workflow?.script_output && workflow?.current_hitl_gate === 'images') ? 'waiting' : (workflow?.script_output && workflow?.status === 'running') ? 'running' : 'pending',
+            status: imageUrls.length > 0 ? 'completed' : (workflow?.character_reference_sheet && workflow?.current_hitl_gate === 'images') ? 'waiting' : ((workflow?.character_reference_sheet || workflow?.script_output) && workflow?.status === 'running') ? 'running' : 'pending',
             meta: imageUrls.length > 0 ? `${imageUrls.length} generated` : undefined
         },
         {
@@ -146,6 +153,7 @@ export default function WorkflowDetailPage() {
                 (s.id === 'tool' && workflow.tool_selection) ||
                 (s.id === 'research' && workflow.research_output) ||
                 (s.id === 'script' && workflow.script_output) ||
+                (s.id === 'character' && workflow.character_reference_sheet) ||
                 (s.id === 'image' && imageUrls.length > 0) ||
                 (s.id === 'video' && workflow.video_url)
             )
@@ -176,6 +184,19 @@ export default function WorkflowDetailPage() {
             refetch()
         } catch (e: any) {
             toast.error(e?.message || 'Failed to purge media')
+        }
+    }
+
+    const handleContinue = async () => {
+        try {
+            setIsContinuing(true)
+            await api.post(`/workflows/${workflowId}/continue`, {})
+            toast.success('Continue started — workflow will resume from the last completed step')
+            refetch()
+        } catch (e: any) {
+            toast.error(e?.message || 'Failed to continue workflow')
+        } finally {
+            setIsContinuing(false)
         }
     }
 
@@ -242,6 +263,12 @@ export default function WorkflowDetailPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {workflow.status === 'failed' && (
+                        <Button size="sm" onClick={handleContinue} disabled={isContinuing}>
+                            <Play className="h-4 w-4 mr-2" />
+                            {isContinuing ? 'Starting…' : 'Continue'}
+                        </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => refetch()}>
                         <RefreshCw className="h-4 w-4 mr-2" />
                         Refresh
@@ -694,6 +721,65 @@ export default function WorkflowDetailPage() {
                     </Card>
                 )}
 
+                {activeStep === 'character' && workflow.character_reference_sheet && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Users className="h-5 w-5 text-primary" />
+                                Character Reference Sheet
+                                {workflow.character_reference_sheet.character_name && (
+                                    <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                        {workflow.character_reference_sheet.character_name}
+                                    </span>
+                                )}
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {workflow.character_reference_sheet.reference_images && workflow.character_reference_sheet.reference_images.length > 0 ? (
+                                <div className="space-y-4">
+                                    {workflow.character_reference_sheet.character_description && (
+                                        <div className="p-3 bg-muted/30 rounded-lg">
+                                            <p className="text-sm text-foreground">
+                                                {workflow.character_reference_sheet.character_description}
+                                            </p>
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                        {workflow.character_reference_sheet.reference_images.map((ref: any, i: number) => (
+                                            <div key={i} className="space-y-2">
+                                                <div className="aspect-square relative rounded-lg overflow-hidden border bg-muted group">
+                                                    <img 
+                                                        src={ref.url} 
+                                                        alt={`${ref.view} view`} 
+                                                        className="object-cover w-full h-full transition-transform group-hover:scale-105"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400"%3E%3Crect fill="%23ccc" width="400" height="400"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="18" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EImage not available%3C/text%3E%3C/svg%3E'
+                                                        }}
+                                                    />
+                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                        <a href={ref.url} target="_blank" rel="noopener noreferrer" className="p-2 bg-background/80 rounded-full hover:bg-background">
+                                                            <ExternalLink className="h-4 w-4" />
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                                <p className="text-xs text-center text-muted-foreground capitalize font-medium">
+                                                    {ref.view} view
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="p-8 text-center text-muted-foreground">
+                                    <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                                    <p>No character reference images available.</p>
+                                    <p className="text-sm mt-2">Character reference images will appear here once generated.</p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+
                 {activeStep === 'image' && (
                     <Card>
                         <CardHeader>
@@ -813,6 +899,7 @@ export default function WorkflowDetailPage() {
                   (activeStep === 'tool' && !workflow.tool_selection) ||
                   (activeStep === 'research' && !workflow.research_output) ||
                   (activeStep === 'script' && !workflow.script_output) ||
+                  (activeStep === 'character' && !workflow.character_reference_sheet) ||
                   (activeStep === 'image' && imageUrls.length === 0) ||
                   (activeStep === 'video' && !workflow.video_url)) && (
                     <Card>

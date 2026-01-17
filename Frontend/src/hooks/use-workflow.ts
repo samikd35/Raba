@@ -26,6 +26,10 @@ export interface WorkflowState {
         scenes: { description: string }[]
         viral_score: number
     }
+    character_reference_sheet?: {
+        character_name: string
+        reference_images: Array<{ view: string; url: string }>
+    }
     generated_images?: string[]
     video_url?: string
 
