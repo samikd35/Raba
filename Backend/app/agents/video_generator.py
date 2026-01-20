@@ -36,6 +36,7 @@ from app.models.video import (
 )
 from app.services.veo import get_veo_service, VeoServiceError
 from app.services.prompt_builder import get_prompt_builder
+from app.services.segment_splitter import compute_segment_context_blocks
 from app.services.supabase import get_supabase_client
 from app.utils.logging import get_logger
 
@@ -182,6 +183,9 @@ def build_video_prompt(
     is_extension: bool = False,
     previous_segment_end: Optional[str] = None,
     anchor: Optional[dict] = None,
+    segment_ctx: Optional[dict] = None,
+    enable_audio: bool = False,
+    enable_subtitles: bool = False,
 ) -> str:
     """Build Veo prompt from script and tool vocabulary.
     
@@ -260,7 +264,7 @@ def build_video_prompt(
         if mood:
             parts.append(f"Mood: {mood}\n")
         parts.append("\n")
-    
+
     if not is_extension and cta and end_time >= script_output.get("duration_seconds", 18) - 3:
         cta_text = cta.get("text", "")
         cta_visual = cta.get("visual_direction", "")
@@ -270,19 +274,62 @@ def build_video_prompt(
             if cta_visual:
                 parts.append(f"Visual: {cta_visual}\n")
             parts.append("\n")
-    
-    parts.append(f"Synchronize dialogue with visuals precisely.\n\n")
+
+    # Optional, structured audio block
+    if enable_audio and segment_ctx:
+        dlg = segment_ctx.get("dialogue_cue") or ""
+        sfx = segment_ctx.get("sfx_cue") or ""
+        amb = segment_ctx.get("ambient_cue") or ""
+        mus = segment_ctx.get("music_cue") or ""
+        # Provide compact segment context for continuity and action
+        parts.append("[SEGMENT CONTEXT]\n")
+        parts.append(f"Segment: {segment_ctx.get('segment_index', 0)} of {segment_ctx.get('total_segments', 1)}\n")
+        if segment_ctx.get("anchor_state"):
+            parts.append(f"Previous State: {segment_ctx.get('anchor_state')}\n")
+        if segment_ctx.get("segment_action"):
+            parts.append(f"Action: {segment_ctx.get('segment_action')}\n")
+        if segment_ctx.get("goal_state"):
+            parts.append(f"Goal State: {segment_ctx.get('goal_state')}\n")
+        parts.append("\n")
+        parts.append("[AUDIO]\n")
+        if dlg:
+            parts.append(f"Dialogue: \"{dlg}\"\n")
+        if sfx:
+            parts.append(f"SFX: {sfx}\n")
+        if amb:
+            parts.append(f"Ambient: {amb}\n")
+        if mus:
+            parts.append(f"Music: {mus}\n")
+        parts.append("\n")
+    else:
+        # Provide segment context even when audio is disabled
+        if segment_ctx:
+            parts.append("[SEGMENT CONTEXT]\n")
+            parts.append(f"Segment: {segment_ctx.get('segment_index', 0)} of {segment_ctx.get('total_segments', 1)}\n")
+            if segment_ctx.get("anchor_state"):
+                parts.append(f"Previous State: {segment_ctx.get('anchor_state')}\n")
+            if segment_ctx.get("segment_action"):
+                parts.append(f"Action: {segment_ctx.get('segment_action')}\n")
+            if segment_ctx.get("goal_state"):
+                parts.append(f"Goal State: {segment_ctx.get('goal_state')}\n")
+            parts.append("\n")
+        parts.append(f"Synchronize dialogue with visuals precisely.\n\n")
     
     parts.append("[REQUIREMENTS]\n")
     parts.append("- Maintain visual consistency throughout\n")
     parts.append("- Smooth, cinematic transitions between shots\n")
     parts.append("- Professional quality, no artifacts\n")
     parts.append("- No text overlays or watermarks\n")
-    
+
     if is_extension:
         parts.append("- CRITICAL: Seamless continuation from previous segment\n")
         parts.append("- Match exact visual style, characters, and atmosphere\n")
-    
+
+    if not enable_audio:
+        parts.append("- Audio: no audio, silent video\n")
+    if not enable_subtitles:
+        parts.append("- (no subtitles, no text overlays)\n")
+
     return "".join(parts)
 
 
@@ -292,6 +339,9 @@ def build_extension_prompt(
     segment_info: dict,
     previous_end_description: str,
     anchor: Optional[dict] = None,
+    segment_ctx: Optional[dict] = None,
+    enable_audio: bool = False,
+    enable_subtitles: bool = False,
 ) -> str:
     """Build continuation prompt for video extension.
     
@@ -312,6 +362,9 @@ def build_extension_prompt(
         is_extension=True,
         previous_segment_end=previous_end_description,
         anchor=anchor,
+        segment_ctx=segment_ctx,
+        enable_audio=enable_audio,
+        enable_subtitles=enable_subtitles,
     )
 
 
@@ -350,7 +403,7 @@ class VideoGeneratorAgent:
             duration_seconds = state.get("duration_seconds", 18)
             aspect_ratio = state.get("aspect_ratio", "9:16")
             resolution = state.get("resolution", "720p")
-            enable_audio = state.get("enable_audio", True)
+            enable_audio = state.get("enable_audio", False)
             
             generated_images = state.get("generated_images", []) or []
             research_images = state.get("research_images", []) or []
@@ -394,6 +447,11 @@ class VideoGeneratorAgent:
             logger.info(f"Downloaded {len(reference_images)} reference images for Veo")
             
             segment_plans = plan_video_segments(duration_seconds)
+            # Compute per-segment context blocks (segment-aware prompting)
+            segment_contexts = compute_segment_context_blocks(
+                script_output=script_output,
+                segment_plans=segment_plans,
+            )
             
             # Template-based prompt if available
             initial_prompt = None
@@ -402,6 +460,7 @@ class VideoGeneratorAgent:
                 if tpl:
                     logger.info("Rendering video_prompt_template for initial segment")
                     script_text = self._format_script_for_template(script_output)
+                    # Prefer segment-specific fields if template supports them
                     ctx = {
                         "script": script_text,
                         "duration": duration_seconds,
@@ -409,6 +468,15 @@ class VideoGeneratorAgent:
                         "tool_category": tool_category,
                         "tool_name": (state.get("selected_tool") or {}).get("tool_name", ""),
                         "segment_info": segment_plans[0],
+                        # New placeholders (segment-aware)
+                        "segment_index": segment_contexts[0].get("segment_index", 0),
+                        "total_segments": len(segment_contexts),
+                        "segment_action": segment_contexts[0].get("segment_action", ""),
+                        "previous_segment_state": segment_contexts[0].get("anchor_state", ""),
+                        "dialogue_cue": segment_contexts[0].get("dialogue_cue", ""),
+                        "sfx_cue": segment_contexts[0].get("sfx_cue", ""),
+                        "ambient_cue": segment_contexts[0].get("ambient_cue", ""),
+                        "music_cue": segment_contexts[0].get("music_cue", ""),
                     }
                     rr = self.prompt_builder.render(
                         tpl,
@@ -421,6 +489,9 @@ class VideoGeneratorAgent:
                             topic=topic,
                             segment_info=segment_plans[0],
                             is_extension=False,
+                            segment_ctx=segment_contexts[0] if segment_contexts else None,
+                            enable_audio=enable_audio,
+                            enable_subtitles=state.get("enable_subtitles", False),
                         ),
                     )
                     initial_prompt = rr.prompt
@@ -434,6 +505,9 @@ class VideoGeneratorAgent:
                         segment_info=segment_plans[0],
                         is_extension=False,
                         anchor=state.get("global_style_anchor") or None,
+                        segment_ctx=segment_contexts[0] if segment_contexts else None,
+                        enable_audio=enable_audio,
+                        enable_subtitles=state.get("enable_subtitles", False),
                     )
             except Exception as e:
                 logger.warning(f"Initial video template rendering failed: {e}; using fallback")
@@ -443,13 +517,26 @@ class VideoGeneratorAgent:
                     topic=topic,
                     segment_info=segment_plans[0],
                     is_extension=False,
+                    segment_ctx=segment_contexts[0] if segment_contexts else None,
+                    enable_audio=enable_audio,
+                    enable_subtitles=state.get("enable_subtitles", False),
                 )
 
-            # Apply user-controlled flags to prompt explicitly
-            if not enable_audio:
-                initial_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
-            if not state.get("enable_subtitles", False):
-                initial_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+            # Apply voice reference (for audio continuity)
+            if enable_audio:
+                try:
+                    voice_ref = ""
+                    char_sheet = state.get("character_reference_sheet") or {}
+                    if char_sheet.get("voice"):
+                        voice_ref = str(char_sheet.get("voice"))
+                    else:
+                        lead_desc = (script_output or {}).get("lead_character_description") or ""
+                        if lead_desc:
+                            voice_ref = lead_desc
+                    if voice_ref:
+                        initial_prompt += "\n[VOICE REFERENCE] " + voice_ref[:300]
+                except Exception:
+                    pass
             # Append global style anchor details to increase consistency (including realistic videos)
             try:
                 anchor = state.get("global_style_anchor") or {}
@@ -494,6 +581,14 @@ class VideoGeneratorAgent:
                             "tool_name": (state.get("selected_tool") or {}).get("tool_name", ""),
                             "segment_info": seg_plan,
                             "previous_segment_end": prev_end,
+                            "segment_index": segment_contexts[i].get("segment_index", i),
+                            "total_segments": len(segment_contexts),
+                            "segment_action": segment_contexts[i].get("segment_action", ""),
+                            "previous_segment_state": segment_contexts[i].get("anchor_state", ""),
+                            "dialogue_cue": segment_contexts[i].get("dialogue_cue", ""),
+                            "sfx_cue": segment_contexts[i].get("sfx_cue", ""),
+                            "ambient_cue": segment_contexts[i].get("ambient_cue", ""),
+                            "music_cue": segment_contexts[i].get("music_cue", ""),
                         }
                         rr = self.prompt_builder.render(
                             tpl,
@@ -505,13 +600,27 @@ class VideoGeneratorAgent:
                                 tool_category=tool_category,
                                 segment_info=seg_plan,
                                 previous_end_description=prev_end,
+                                anchor=state.get("global_style_anchor") or None,
+                                segment_ctx=segment_contexts[i] if i < len(segment_contexts) else None,
+                                enable_audio=enable_audio,
+                                enable_subtitles=state.get("enable_subtitles", False),
                             ),
                         )
                         ext_prompt = rr.prompt
-                        if not enable_audio:
-                            ext_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
-                        if not state.get("enable_subtitles", False):
-                            ext_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+                        if enable_audio:
+                            try:
+                                voice_ref = ""
+                                char_sheet = state.get("character_reference_sheet") or {}
+                                if char_sheet.get("voice"):
+                                    voice_ref = str(char_sheet.get("voice"))
+                                else:
+                                    lead_desc = (script_output or {}).get("lead_character_description") or ""
+                                    if lead_desc:
+                                        voice_ref = lead_desc
+                                if voice_ref:
+                                    ext_prompt += "\n[VOICE REFERENCE] " + voice_ref[:300]
+                            except Exception:
+                                pass
                         try:
                             anchor = state.get("global_style_anchor") or {}
                             if anchor:
@@ -541,11 +650,25 @@ class VideoGeneratorAgent:
                             segment_info=seg_plan,
                             previous_end_description=prev_end,
                             anchor=state.get("global_style_anchor") or None,
+                            segment_ctx=segment_contexts[i] if i < len(segment_contexts) else None,
+                            enable_audio=enable_audio,
+                            enable_subtitles=state.get("enable_subtitles", False),
                         )
-                        if not enable_audio:
-                            ext_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
-                        if not state.get("enable_subtitles", False):
-                            ext_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+                        # Add voice reference when audio enabled
+                        if enable_audio:
+                            try:
+                                voice_ref = ""
+                                char_sheet = state.get("character_reference_sheet") or {}
+                                if char_sheet.get("voice"):
+                                    voice_ref = str(char_sheet.get("voice"))
+                                else:
+                                    lead_desc = (script_output or {}).get("lead_character_description") or ""
+                                    if lead_desc:
+                                        voice_ref = lead_desc
+                                if voice_ref:
+                                    ext_prompt += "\n[VOICE REFERENCE] " + voice_ref[:300]
+                            except Exception:
+                                pass
                         try:
                             anchor = state.get("global_style_anchor") or {}
                             if anchor:
@@ -576,11 +699,24 @@ class VideoGeneratorAgent:
                         segment_info=seg_plan,
                         previous_end_description=prev_end,
                         anchor=state.get("global_style_anchor") or None,
+                        segment_ctx=segment_contexts[i] if i < len(segment_contexts) else None,
+                        enable_audio=enable_audio,
+                        enable_subtitles=state.get("enable_subtitles", False),
                     )
-                    if not enable_audio:
-                        ext_prompt += "\n\n[AUDIO] no audio, no sound, silent video."
-                    if not state.get("enable_subtitles", False):
-                        ext_prompt += "\n[TEXT] no subtitles, no text overlays, no UI labels."
+                    if enable_audio:
+                        try:
+                            voice_ref = ""
+                            char_sheet = state.get("character_reference_sheet") or {}
+                            if char_sheet.get("voice"):
+                                voice_ref = str(char_sheet.get("voice"))
+                            else:
+                                lead_desc = (script_output or {}).get("lead_character_description") or ""
+                                if lead_desc:
+                                    voice_ref = lead_desc
+                            if voice_ref:
+                                ext_prompt += "\n[VOICE REFERENCE] " + voice_ref[:300]
+                        except Exception:
+                            pass
                     try:
                         anchor = state.get("global_style_anchor") or {}
                         if anchor:

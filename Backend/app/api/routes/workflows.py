@@ -196,6 +196,8 @@ async def get_workflow(workflow_id: str) -> WorkflowOutput:
         resolution=workflow["resolution"],
         category=workflow["category"],
         hitl_mode=workflow["hitl_mode"],
+        enable_audio=workflow.get("enable_audio", True),
+        enable_subtitles=workflow.get("enable_subtitles", False),
         current_hitl_gate=workflow.get("current_hitl_gate"),
         tool_selection=tool_selection,
         research_output=workflow.get("research_output"),

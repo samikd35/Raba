@@ -179,7 +179,7 @@ class WorkflowRunner:
             "resolution": workflow.get("resolution", "1080p"),
             "category": workflow.get("category", "auto"),
             "hitl_mode": workflow.get("hitl_mode", "auto"),
-            "enable_audio": workflow.get("enable_audio", True),
+            "enable_audio": workflow.get("enable_audio", False),
             "enable_subtitles": workflow.get("enable_subtitles", False),
             "user_reference_image_url": workflow.get("user_reference_image_url"),
             "user_selected_tool_id": workflow.get("user_selected_tool_id"),

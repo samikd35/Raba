@@ -142,6 +142,14 @@ class ToolMetadata(BaseModel):
         default=None,
         description="Template for image generation prompts"
     )
+    image_negative_constraint: Optional[str] = Field(
+        default=None,
+        description="Optional negative constraints text to append to image prompts"
+    )
+    audio_strategy: Optional[str] = Field(
+        default="native_veo",
+        description="Audio generation strategy (native_veo only)"
+    )
     example_topics: list[str] = Field(
         default_factory=list,
         description="Example topics this tool excels at"

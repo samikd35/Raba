@@ -91,6 +91,13 @@ class GlobalStyleAnchorAgent:
             # Validate minimal keys; fallback to defaults for category
             base = DEFAULT_ANCHORS.get(category, DEFAULT_ANCHORS["surreal_realism"]).copy()
             base.update({k: v for k, v in anchors.items() if v})
+            # Enforce optical presets per category (no anamorphic in stylized_3d)
+            if category == "stylized_3d":
+                base["camera"] = "tilt-shift miniature look, 35mm/50mm lens, shallow depth of field"
+            elif category == "surreal_realism":
+                base["camera"] = "wide-angle anamorphic 14–24mm, cinematic widescreen"
+            elif category == "high_octane_anime":
+                base["camera"] = "dynamic long lens 85–200mm, strong compression for action"
             # Build style_description if missing
             if not base.get("style_description"):
                 base["style_description"] = (
@@ -102,6 +109,13 @@ class GlobalStyleAnchorAgent:
         except Exception as e:
             logger.warning(f"GlobalStyleAnchor fallback used due to error: {e}")
             base = DEFAULT_ANCHORS.get(category, DEFAULT_ANCHORS["surreal_realism"]).copy()
+            # Enforce optical presets in fallback as well
+            if category == "stylized_3d":
+                base["camera"] = "tilt-shift miniature look, 35mm/50mm lens, shallow depth of field"
+            elif category == "surreal_realism":
+                base["camera"] = "wide-angle anamorphic 14–24mm, cinematic widescreen"
+            elif category == "high_octane_anime":
+                base["camera"] = "dynamic long lens 85–200mm, strong compression for action"
             base["style_description"] = (
                 f"Global style anchor for {category}: lighting={base['lighting']}, camera={base['camera']}, "
                 f"texture={base['texture']}, palette={', '.join(base.get('color_palette', [])[:5])}."
@@ -112,4 +126,3 @@ class GlobalStyleAnchorAgent:
 async def global_style_anchor_node(state: VideoGenerationState) -> dict[str, Any]:
     agent = GlobalStyleAnchorAgent()
     return await agent.run(state)
-

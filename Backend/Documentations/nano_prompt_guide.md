@@ -10,6 +10,9 @@ Gemini can generate and process images conversationally. You can prompt either t
 
 All generated images include a[SynthID watermark](https://ai.google.dev/responsible/docs/safeguards/synthid).
 
+Negative constraints (in-prompt)
+Gemini image APIs do not expose a separate negativePrompt field. Use an explicit “Negative Constraints” sentence or block at the end of your prompt, or supply `{image_negative_constraint}` via tools. Example: “The image must be free of text, watermarks, labels, lettering, and UI overlays. No artifacts, distorted elements, or unintended graphical additions.”
+
 ## Image generation (text-to-image)
 
 ### Python

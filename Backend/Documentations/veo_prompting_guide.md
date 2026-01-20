@@ -118,6 +118,10 @@ patter of rain and a low, otherworldly hum from the glowing fungi"
 Camera angles
 Camera angles define the shot's viewpoint, directly influencing how the audience perceives the subject.
 
+
+Reference images usage (RABA practice)
+In multi-segment generation, pass reference images only for the initial segment to establish look and character. For extensions, Veo’s API accepts the previous video as context, not images. Maintain continuity using strong textual prompts: segment context, previous state, [GLOBAL STYLE ANCHOR], and [VOICE REFERENCE].
+
 Important: Some advanced camera angles are not officially supported. The results and reliability may vary depending on the overall prompt and your specific use case.
 
 The following are examples of camera angles that you can use:

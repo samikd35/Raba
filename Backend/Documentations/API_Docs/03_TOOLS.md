@@ -12,6 +12,7 @@ Tools define visual styles and prompt templates for video generation. Each tool 
 - **Prompt templates** for script, image, and video generation
 - **Capabilities** (e.g., flow visualization, anime style)
 - **Parameters schema** for customization
+ - Optional strategy/constraints fields for audio/image prompting
 
 Tools can be created from simple ideas - Gemini 2.5 Flash enhances them into full configurations.
 
@@ -166,6 +167,8 @@ Create a new tool from a user idea. Gemini 2.5 Flash enhances the idea into a fu
   "script_prompt_template": "Write a {duration}-second script about {topic} with a cyberpunk noir tone...",
   "image_prompt_template": "A cinematic cyberpunk street scene depicting {scene_description}...",
   "video_prompt_template": "Generate a {duration}-second video following this script: {script}...",
+  "image_negative_constraint": "No text, watermarks, labels; no artifacts or distorted elements.",
+  "audio_strategy": "native_veo",
   "parameters_schema": {
     "type": "object",
     "properties": {
@@ -713,3 +716,16 @@ function ToolCreator({ onToolCreated }) {
   );
 }
 ```
+## Template Placeholders
+
+Each template must include core placeholders and may include segment-aware/audio placeholders.
+
+- Script: `{topic}`, `{tone}`, `{duration}`
+- Image: `{scene_description}`, `{style}`; optional `{image_negative_constraint}`
+- Video (legacy): `{script}`, `{duration}`
+- Video (segment-aware, preferred): `{segment_index}`, `{total_segments}`, `{segment_action}`, `{previous_segment_state}`, plus audio cues `{dialogue_cue}`, `{sfx_cue}`, `{ambient_cue}`, `{music_cue}`
+
+Validation rules:
+- Video templates must not include timestamp-based SFX like "at 3.2s"; use action-anchored audio cues instead.
+- Image templates must include a negative constraints section or `{image_negative_constraint}`.
+- Optics presets are enforced by category; avoid "anamorphic" for `stylized_3d`.

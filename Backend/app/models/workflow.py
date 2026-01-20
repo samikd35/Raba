@@ -141,6 +141,8 @@ class WorkflowOutput(BaseModel):
     resolution: str = Field(..., description="Video resolution")
     category: str = Field(..., description="Selected category")
     hitl_mode: str = Field(..., description="HITL mode")
+    enable_audio: bool = Field(..., description="Generate audio (from user input at creation)")
+    enable_subtitles: bool = Field(..., description="Generate subtitles (from user input at creation)")
     
     current_hitl_gate: Optional[str] = Field(default=None, description="Current HITL gate if paused")
     

@@ -87,13 +87,16 @@ Must include: {scene_description}, {style}
 **CRITICAL: Replace adjectives with technical parameters.** No "dramatic lighting" - use "Global Illumination with 45-degree Rembrandt angle". No "epic style" - use "Unreal Engine 5 rendering pipeline with cel-shaded 2D ink-wash overlays".
 
 MUST explicitly include ALL of the following TECHNICAL sections (use exact keywords):
-1. **Rendering Engine & Optics**: Define the virtual lens with SPECIFIC VALUES (e.g., "35mm Anamorphic lens profile, f/1.8 aperture, shallow depth of field"). Specify focal length (14mm wide-angle, 85mm prime, etc.).
+1. **Rendering Engine & Optics**: Define the virtual lens with SPECIFIC VALUES. Enforce CATEGORY OPTICS PRESETS:
+   - stylized_3d → Tilt-Shift miniature look (35mm/50mm), NEVER anamorphic
+   - surreal_realism → Wide-angle anamorphic (14–24mm)
+   - high_octane_anime → Dynamic long lens (85–200mm)
 2. **Lighting Section**: MUST use the word "lighting". Use technical terms: "Volumetric God-rays at 45-degree angle", "Global Illumination bounce", "Ray-traced reflections", "HDR contrast ratio".
 3. **Material Science**: Define textures using technical rendering terms: "Subsurface Scattering for skin", "Anisotropic Filtering for metallic surfaces", "PBR (Physically Based Rendering) workflow".
 4. **Color Section**: MUST use the word "color". Define color palette with technical values (e.g., "HDR color gamut: Deep crimson (#8B0000) against electric blue (#0066FF)"). Specify color grading method.
 5. **Composition Section**: MUST use the word "composition". Use mathematical terms: "Golden Spiral leading to focal point", "Rule of thirds with optical center at (x,y)", "Diagonal lines at 45-degree angle".
 6. **Resolution Section**: MUST use the word "resolution". "8K native resolution (7680x4320), high-dynamic-range (HDR) contrast, zero-noise diffusion, sharp-edged cel-shading (if anime) or ray-traced reflections (if realistic)".
-7. **Negative Constraints**: Explicitly list prohibited artifacts (minimum 50 words): "Exclude: Photorealistic human skin textures if stylized, uncanny valley eyes, hair-strand realism. No low-poly jagged edges, z-fighting textures, or clipping geometry. Avoid: Generic stock-photo lighting. Absolutely NO baked-in text, floating gibberish, or blurry alphabet soup on objects. No chromatic aberration over 5%, over-saturated neon glow that washes out detail."
+7. **Negative Constraints**: Use in-prompt constraints (Gemini image has no negativePrompt). Either include a NEGATIVE CONSTRAINTS section explicitly or preserve `{image_negative_constraint}` placeholder that will be appended in code. Prohibit text/watermarks/labels and artifacts.
 
 **WORD COUNT ENFORCEMENT - CRITICAL**: 
 - The template itself must be AT LEAST 150 words - this is NON-NEGOTIABLE
@@ -109,6 +112,9 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 ### video_prompt_template (for Veo 3.1)
 **MINIMUM 150 WORDS - NO EXCEPTIONS - COUNT WORDS CAREFULLY**
 Must include: {script}, {duration}
+Should also include SEGMENT-AWARE placeholders when possible:
+- `{segment_index}`, `{total_segments}`, `{segment_action}`, `{previous_segment_state}`
+- Audio Block placeholders: `{dialogue_cue}`, `{sfx_cue}`, `{ambient_cue}`, `{music_cue}` (optional)
 
 **CRITICAL: MANDATORY KEYWORDS** - The template MUST contain these exact words (case-insensitive):
 - "camera"
@@ -273,7 +279,7 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 4. **Temporal Consistency Protocol**: Specify "Motion Bucket" value (1-10) and define "Start Frame Reference" and "End Frame Goal" to prevent 'sliding' or 'morphing'. Include "Seed Inheritance" instructions.
 5. **Pacing Section**: MUST use the word "pacing". Use technical terms: "Speed Ramping: start at 0.5x speed for hook, accelerate to 2x during action peaks", "Temporal sampling at 60fps with frame interpolation".
 6. **Effects Section**: MUST use the word "effects". Specify "Particle Physics: Fluid Dynamics layer for environmental elements", "Chromatic Aberration at edges (max 5%)", "High-bitrate finish to eliminate digital artifacts".
-7. **Audio Section**: MUST use the word "audio". Audio-Visual Sync Points: Define EXACT TIMESTAMPS: "Place 'Bass Drops' or 'Sfx Stabs' at exactly 3.2s and 7.5s timestamps".
+7. **Audio Block**: MUST use the word "audio". Define a structured block with Dialogue, SFX (tied to a visual action; no explicit timestamps), Ambient, and optional Music. Include a no-subtitles guardrail when appropriate (e.g., "no subtitles, no text overlays").
 8. **Consistency Section**: MUST use the word "consistency". "Ensure 100% subject-persistence across frame transitions. No 'morphing' or 'sliding'—feet must have 'grounded weight' on the terrain. Maintain facial geometry consistency using seed inheritance."
 
 **WORD COUNT ENFORCEMENT - CRITICAL**: 
@@ -285,7 +291,7 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 - Target 155-165 words to ensure you're safely above the minimum
 
 **Example Technical Blueprint:**
-"Synthesize a {duration}-second cinematic sequence based on the script: {script}. Reference the static keyframe from {image_reference} and animate it into motion. Motion Dynamics: Maintain 'Temporal Consistency' of the subject's facial geometry. Motion Intensity: 8/10. Cinematography: Execute a 'Dolly-in' coupled with a 'Low-Angle Tracking Shot' at 60fps. Utilize 'Speed Ramping'—start at 0.5x speed for the hook and accelerate to 2x during action peaks. Particle Physics: Integrate a 'Fluid Dynamics' layer for environmental elements (smoke, embers, or rain) that reacts to the subject's movement. Temporal Sampling: Ensure 100% subject-persistence across frame transitions. No 'morphing' or 'sliding'—feet must have 'grounded weight' on the terrain. Audio-Visual Sync: Place 'Bass Drops' or 'Sfx Stabs' at exactly the 3.2s and 7.5s timestamps. Post-Processing: Apply subtle 'Chromatic Aberration' at the edges (max 5%) and a high-bitrate finish to eliminate digital artifacts."
+"Synthesize a {duration}-second cinematic sequence based on the script: {script}. Use segment-aware context: Segment {segment_index} of {total_segments}, Action: {segment_action}, Continuity: {previous_segment_state}. Motion Dynamics: Maintain 'Temporal Consistency' of the subject's facial geometry. Motion Intensity: 8/10. Cinematography: Execute a 'Dolly-in' coupled with a 'Low-Angle Tracking Shot' at 60fps. Utilize 'Speed Ramping'—start at 0.5x speed for the hook and accelerate to 2x during action peaks. Particle Physics: Integrate a 'Fluid Dynamics' layer for environmental elements (smoke, embers, or rain). Audio: Dialogue: {dialogue_cue}. SFX: {sfx_cue}. Ambient: {ambient_cue}. Music: {music_cue}. (no subtitles, no text overlays). Post-Processing: Apply subtle 'Chromatic Aberration' at the edges (max 5%) and a high-bitrate finish to eliminate digital artifacts."
 
 ## THE "ANTI-ADJECTIVE" RULE
 
@@ -342,6 +348,88 @@ class ToolEnhancerService:
             gemini_service: Optional Gemini service instance. If None, uses singleton.
         """
         self._gemini = gemini_service or get_gemini_service()
+        self._validator = get_template_validator()
+
+    # ---------------------
+    # Template repair utils
+    # ---------------------
+    def _remove_timestamp_sfx(self, text: str) -> str:
+        import re
+        # Remove patterns like "at 3.2s", "@7.5s", "at 5s"
+        text = re.sub(r"\b(at|@)\s*\d+(?:\.\d+)?\s*s\b", "", text, flags=re.IGNORECASE)
+        # Clean double spaces left behind
+        return re.sub(r"\s{2,}", " ", text)
+
+    def _ensure_video_segment_placeholders(self, text: str) -> str:
+        # If any segment placeholders are present, leave as-is
+        has_any = any(ph in text for ph in [
+            "{segment_index}", "{total_segments}", "{segment_action}", "{previous_segment_state}"
+        ])
+        if has_any:
+            return text
+        # Prepend a SEGMENT CONTEXT block
+        segment_block = (
+            "\n\n[SEGMENT CONTEXT]\n"
+            "Segment: {segment_index} of {total_segments}\n"
+            "Action: {segment_action}\n"
+            "Continuity: {previous_segment_state}\n"
+        )
+        return text + segment_block
+
+    def _ensure_video_audio_placeholders(self, text: str) -> str:
+        # Ensure presence of audio placeholders block
+        has_audio_keys = any(ph in text for ph in ["{dialogue_cue}", "{sfx_cue}", "{ambient_cue}", "{music_cue}"])
+        if has_audio_keys:
+            return text
+        audio_block = (
+            "\n\n[AUDIO]\n"
+            "Dialogue: {dialogue_cue}\n"
+            "SFX: {sfx_cue}\n"
+            "Ambient: {ambient_cue}\n"
+            "Music: {music_cue}\n"
+            "(no subtitles, no text overlays)\n"
+        )
+        return text + audio_block
+
+    def _enforce_optics_in_image(self, text: str, category: CategoryEnum) -> str:
+        t = text
+        if category == CategoryEnum.STYLIZED_3D:
+            # Avoid anamorphic; encourage tilt-shift
+            t = t.replace("anamorphic", "tilt-shift miniature look")
+            if "tilt-shift" not in t.lower():
+                t += "\n\n[OPTICS] Tilt-shift miniature look (35mm/50mm), shallow depth of field."
+        elif category == CategoryEnum.SURREAL_REALISM:
+            if "anamorphic" not in t.lower():
+                t += "\n\n[OPTICS] Wide-angle anamorphic (14–24mm), cinematic widescreen."
+        elif category == CategoryEnum.HIGH_OCTANE_ANIME:
+            if "85" not in t and "200" not in t and "long lens" not in t.lower():
+                t += "\n\n[OPTICS] Dynamic long lens (85–200mm), compression for action."
+        return t
+
+    def _ensure_image_negative(self, text: str) -> str:
+        tl = text.lower()
+        if "{image_negative_constraint}" in text or "negative constraint" in tl or "no text" in tl:
+            return text
+        return text + "\n\nNEGATIVE CONSTRAINTS: {image_negative_constraint}"
+
+    def _repair_templates(self, resp: ToolEnhancementResponse, *, category: CategoryEnum) -> ToolEnhancementResponse:
+        # Video template fixes
+        if resp.video_prompt_template:
+            v = resp.video_prompt_template
+            v = self._remove_timestamp_sfx(v)
+            v = self._ensure_video_segment_placeholders(v)
+            v = self._ensure_video_audio_placeholders(v)
+            resp.video_prompt_template = v
+
+        # Image template fixes
+        if resp.image_prompt_template:
+            im = resp.image_prompt_template
+            im = self._enforce_optics_in_image(im, category)
+            im = self._ensure_image_negative(im)
+            resp.image_prompt_template = im
+        return resp
+
+    # Note: public route-level repair helper removed per request; internal repairs remain
     
     async def enhance_tool_idea(
         self,
@@ -402,6 +490,12 @@ Generate a complete tool configuration following the schema requirements."""
         
         # Ensure tool_id is properly formatted
         response.tool_id = self._sanitize_tool_id(response.tool_id)
+        # Post-process templates to enforce placeholders/constraints
+        try:
+            cat = response.category if isinstance(response.category, CategoryEnum) else CategoryEnum(response.category)
+        except Exception:
+            cat = CategoryEnum.SURREAL_REALISM
+        response = self._repair_templates(response, category=cat)
         
         logger.info(f"Enhanced tool: {response.tool_id} -> {response.category}")
         return response
@@ -479,6 +573,12 @@ Generate an improved version of this tool. Keep the same tool_id."""
         
         # Keep the original tool_id
         response.tool_id = existing_tool.tool_id
+        # Post-process templates to enforce placeholders/constraints (use existing category)
+        try:
+            cat = existing_tool.category if isinstance(existing_tool.category, CategoryEnum) else CategoryEnum(existing_tool.category)
+        except Exception:
+            cat = CategoryEnum.SURREAL_REALISM
+        response = self._repair_templates(response, category=cat)
         
         # If preserving templates, restore originals
         if request.preserve_templates:

@@ -67,6 +67,44 @@ class VideoTrimmerService:
             return input_bytes
 
 
+    async def trim_to_duration(self, input_bytes: bytes, target_duration_seconds: float) -> bytes:
+        """Hard-trim the video to target duration from start (0 to target).
+
+        If ffmpeg is unavailable, returns the original bytes.
+        """
+        try:
+            import shutil
+            has_ffmpeg = shutil.which("ffmpeg") is not None
+            if not has_ffmpeg:
+                logger.warning("ffmpeg not found; skipping trim_to_duration")
+                return input_bytes
+
+            import tempfile, os
+            with tempfile.TemporaryDirectory() as td:
+                in_path = os.path.join(td, "in.mp4")
+                out_path = os.path.join(td, "out.mp4")
+                with open(in_path, "wb") as f:
+                    f.write(input_bytes)
+                cmd = [
+                    "ffmpeg", "-y", "-i", in_path,
+                    "-t", str(float(target_duration_seconds)),
+                    "-c", "copy", out_path,
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                _out, err = await proc.communicate()
+                if proc.returncode != 0:
+                    logger.warning(f"ffmpeg trim_to_duration failed: {err.decode(errors='ignore')[:200]}")
+                    return input_bytes
+                with open(out_path, "rb") as f:
+                    out_bytes = f.read()
+                logger.info("Video hard-trimmed to target duration with ffmpeg")
+                return out_bytes or input_bytes
+        except Exception as e:
+            logger.warning(f"trim_to_duration failed, returning original video: {e}")
+            return input_bytes
+
 _video_trimmer: Optional[VideoTrimmerService] = None
 
 
@@ -75,4 +113,3 @@ def get_video_trimmer() -> VideoTrimmerService:
     if _video_trimmer is None:
         _video_trimmer = VideoTrimmerService()
     return _video_trimmer
-

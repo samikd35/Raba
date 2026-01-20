@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 
 # Limit generated images to align with Veo reference cap
 MIN_GENERATED_IMAGES = 1  # Always generate at least 1 image
-MAX_GENERATED_IMAGES = 3  # Never generate more than 3 images
+MAX_GENERATED_IMAGES = 1  # CRITIC: Master Style Frame only (single image)
 VEO_MAX_REFERENCE_IMAGES = 3  # Veo 3.1 accepts max 3 reference images
 
 ASPECT_RATIO_MAP = {
@@ -85,13 +85,8 @@ def calculate_images_to_generate(
     Returns:
         Number of images to generate (1-3)
     """
-    # Always generate up to 3 images, regardless of user/research images
-    # These are used as style references during generation, not final Veo references
-    to_generate = MAX_GENERATED_IMAGES
-    
-    # Respect scene_count limit (don't generate more images than scenes)
-    if scene_count > 0:
-        to_generate = min(to_generate, scene_count)
+    # CRITIC: Master Style Frame only – always generate 1 image
+    to_generate = 1
     
     # Ensure at least 1 image is generated
     to_generate = max(MIN_GENERATED_IMAGES, to_generate)
@@ -130,15 +125,12 @@ def build_image_prompt(
         Formatted prompt for image generation
     """
     parts = []
-    
-    parts.append(f"Create a high-quality image for Scene {scene_number} of {total_scenes} ")
-    parts.append(f"in a {duration_seconds}-second YouTube Short about: {topic}\n\n")
-    
-    parts.append("VISUAL DESCRIPTION:\n")
+    parts.append("Create a single MASTER STYLE FRAME image that defines overall style and character consistency for the entire video.\n\n")
+    parts.append(f"TOPIC CONTEXT: {topic}. Duration: {duration_seconds}s.\n\n")
+    parts.append("VISUAL DESCRIPTION (representative opening moment):\n")
     description = scene.get("description", "")
     if description:
         parts.append(f"{description}\n\n")
-    
     parts.append("STYLE REQUIREMENTS:\n")
     if anchor:
         parts.append(f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n")
@@ -148,26 +140,7 @@ def build_image_prompt(
             parts.append(f"- Lighting: {anchor.get('lighting')}\n")
         if anchor.get('camera'):
             parts.append(f"- Camera: {anchor.get('camera')}\n")
-    parts.append("\n")
-    
-    camera_direction = scene.get("camera_direction", "")
-    if camera_direction:
-        parts.append(f"CAMERA: {camera_direction}\n")
-    
-    lighting = scene.get("lighting", "")
-    if lighting:
-        parts.append(f"LIGHTING: {lighting}\n")
-    
-    mood = scene.get("mood", "")
-    if mood:
-        parts.append(f"MOOD: {mood}\n")
-    
-    audio_cues = scene.get("audio_cues", "")
-    if audio_cues:
-        parts.append(f"\nATMOSPHERE (implied by audio): {audio_cues}\n")
-    
     parts.append("\nTECHNICAL: High resolution, sharp details, professional quality.")
-    
     return "".join(parts)
 
 
@@ -215,11 +188,8 @@ class ImageGeneratorAgent:
             topic = state.get("topic", "")
             duration_seconds = state.get("duration_seconds", 18)
             
-            images_to_generate = calculate_images_to_generate(
-                scene_count=len(scenes),
-                user_has_reference=bool(user_reference_url),
-                research_image_count=len(research_images),
-            )
+            # CRITIC: Always generate a single Master Style Frame
+            images_to_generate = 1
             
             config = ImageGenerationConfig(
                 model=ImageModel.NANO_BANANA_PRO,
@@ -230,8 +200,15 @@ class ImageGeneratorAgent:
             )
             
             prompts = []
-            selected_scenes = scenes[:images_to_generate]
+            selected_scenes = scenes[:1] if scenes else [{"description": topic, "scene_number": 1}]
             anchor = state.get("global_style_anchor") or {}
+            neg_default = (
+                "The image must be free of text, watermarks, labels, lettering, and UI overlays. "
+                "No artifacts, distorted elements, or unintended graphical additions."
+            )
+            tool = state.get("selected_tool") or {}
+            neg_from_tool = tool.get("image_negative_constraint")
+            negative_block = neg_from_tool if (isinstance(neg_from_tool, str) and neg_from_tool.strip()) else neg_default
             for i, scene in enumerate(selected_scenes):
                 # Template-based prompt if available
                 template = (state.get("selected_tool") or {}).get("image_prompt_template")
@@ -254,6 +231,7 @@ class ImageGeneratorAgent:
                             "global_lighting": anchor.get("lighting", ""),
                             "global_camera": anchor.get("camera", ""),
                             "global_texture": anchor.get("texture", ""),
+                            "image_negative_constraint": negative_block,
                         }
                         rr = self.prompt_builder.render(
                             template,
@@ -270,7 +248,11 @@ class ImageGeneratorAgent:
                                 anchor=anchor,
                             ),
                         )
-                        prompts.append(rr.prompt)
+                        # Append Negative Constraint Block if template didn't include it
+                        prompt_text = rr.prompt
+                        if "image_negative_constraint" not in (template or ""):
+                            prompt_text += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
+                        prompts.append(prompt_text)
                         if rr.fallback_used:
                             logger.warning(f"Image template fallback used for scene {i+1}")
                         else:
@@ -306,6 +288,7 @@ class ImageGeneratorAgent:
                             f"Lighting: {anchor.get('lighting','')}\n"
                             f"Camera: {anchor.get('camera','')}\n"
                         )
+                    prompt += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
                     prompts.append(prompt)
             
             style_reference = self._build_style_reference(
@@ -384,6 +367,7 @@ class ImageGeneratorAgent:
                     used_style_reference=(i > 0 or user_ref_bytes is not None),
                     style_reference_url=user_reference_url if i == 0 else None,
                     retry_count=retry_count,
+                    role="master_style_frame",
                 )
                 generated_images.append(generated_image)
                 logger.info(f"Image {i + 1} uploaded: {image_url}")

@@ -22,7 +22,7 @@ class TrimAgent:
     async def run(self, state: VideoGenerationState) -> dict[str, Any]:
         video_output = state.get("video_output", {}) or {}
         url = state.get("final_video_url") or video_output.get("video", {}).get("url")
-        duration = float(video_output.get("total_duration_seconds") or state.get("duration_seconds", 18))
+        target_duration = float(video_output.get("total_duration_seconds") or state.get("duration_seconds", 18))
         if not url:
             logger.warning("No video URL available for trimming")
             return {}
@@ -30,7 +30,10 @@ class TrimAgent:
         try:
             # Download, trim, upload
             data = await self.veo.download_video(video_output.get("video", {}))
-            trimmed = await self.trimmer.trim_edges(data, duration)
+            # First, hard trim to target duration to remove overrun
+            data = await self.trimmer.trim_to_duration(data, target_duration)
+            # Then, optional edge trim to remove jitter
+            trimmed = await self.trimmer.trim_edges(data, target_duration)
             # Re-upload trimmed file
             from app.services.supabase import get_supabase_client
             supabase = get_supabase_client()
@@ -57,4 +60,3 @@ class TrimAgent:
 async def trim_agent_node(state: VideoGenerationState) -> dict[str, Any]:
     agent = TrimAgent()
     return await agent.run(state)
-

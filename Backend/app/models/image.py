@@ -177,6 +177,10 @@ class GeneratedImage(BaseModel):
         ge=0,
         description="Number of retries before success"
     )
+    role: Optional[str] = Field(
+        default=None,
+        description="Optional role label (e.g., 'master_style_frame')"
+    )
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
         description="Timestamp of generation"
