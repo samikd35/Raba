@@ -30,8 +30,8 @@ type ToolListItem = {
 const formSchema = z.object({
   topic: z.string().min(3, {
     message: "Topic must be at least 3 characters.",
-  }).max(500, {
-    message: "Topic must not exceed 500 characters.",
+  }).max(2000, {
+    message: "Topic must not exceed 2000 characters.",
   }),
   duration_seconds: z.string(),
   aspect_ratio: z.string(),
@@ -272,10 +272,14 @@ export default function CreatePage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="8">8 Seconds (Snap)</SelectItem>
-                          <SelectItem value="16">16 Seconds (Standard)</SelectItem>
-                          <SelectItem value="24">24 Seconds (Extended)</SelectItem>
-                          <SelectItem value="32">32 Seconds (Max)</SelectItem>
+                          <SelectItem value="8">8 Seconds</SelectItem>
+                          <SelectItem value="16">16 Seconds</SelectItem>
+                          <SelectItem value="24">24 Seconds</SelectItem>
+                          <SelectItem value="32">32 Seconds</SelectItem>
+                          <SelectItem value="40">40 Seconds</SelectItem>
+                          <SelectItem value="48">48 Seconds</SelectItem>
+                          <SelectItem value="56">56 Seconds</SelectItem>
+                          <SelectItem value="60">60 Seconds (Max)</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -297,9 +301,9 @@ export default function CreatePage() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="auto">Auto (AI Selects)</SelectItem>
-                          <SelectItem value="surreal_realism">Surreal Realism</SelectItem>
-                          <SelectItem value="high_octane_anime">High-Octane Anime</SelectItem>
-                          <SelectItem value="stylized_3d">Stylized 3D</SelectItem>
+                          <SelectItem value="realistic">Realistic</SelectItem>
+                          <SelectItem value="anime">Anime</SelectItem>
+                          <SelectItem value="animation">Animation</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

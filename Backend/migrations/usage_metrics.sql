@@ -6,7 +6,7 @@
 
 CREATE TABLE IF NOT EXISTS usage_metrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    video_id UUID REFERENCES videos(id) ON DELETE SET NULL,
+    workflow_id UUID REFERENCES workflows(id) ON DELETE SET NULL,
     generation_type TEXT NOT NULL CHECK (generation_type IN ('text', 'image', 'video', 'research', 'embedding')),
     model_name TEXT NOT NULL,
     input_tokens INTEGER DEFAULT 0,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS usage_metrics (
 );
 
 -- Indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_usage_metrics_video_id ON usage_metrics(video_id);
+CREATE INDEX IF NOT EXISTS idx_usage_metrics_workflow_id ON usage_metrics(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_usage_metrics_generation_type ON usage_metrics(generation_type);
 CREATE INDEX IF NOT EXISTS idx_usage_metrics_model_name ON usage_metrics(model_name);
 CREATE INDEX IF NOT EXISTS idx_usage_metrics_created_at ON usage_metrics(created_at DESC);
@@ -36,8 +36,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_metrics_type_date ON usage_metrics(generati
 -- Allow authenticated users to read their own video metrics
 -- CREATE POLICY "Users can view own video metrics"
 --     ON usage_metrics FOR SELECT
---     USING (video_id IN (
---         SELECT id FROM videos WHERE user_id = auth.uid()
+--     USING (workflow_id IN (
+--         SELECT id FROM workflows WHERE user_id = auth.uid()
 --     ));
 
 -- Allow service role full access
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_metrics_type_date ON usage_metrics(generati
 --     ON usage_metrics FOR ALL
 --     USING (auth.role() = 'service_role');
 
-COMMENT ON TABLE usage_metrics IS 'Token usage and cost tracking for text, image, and video generation';
+COMMENT ON TABLE usage_metrics IS 'Token usage and cost tracking for text, image, video, and research by workflow';
 COMMENT ON COLUMN usage_metrics.generation_type IS 'Type: text, image, video, research, embedding';
 COMMENT ON COLUMN usage_metrics.cost_usd IS 'Calculated cost in USD based on model pricing';
 COMMENT ON COLUMN usage_metrics.cached_tokens IS 'Tokens served from cache (no cost)';

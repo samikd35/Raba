@@ -39,7 +39,7 @@ class TokenUsage(BaseModel):
 class UsageRecord(BaseModel):
     """A single usage record for tracking."""
     id: str = Field(default_factory=lambda: str(uuid4()))
-    video_id: Optional[str] = None  # References videos table
+    video_id: Optional[str] = None  # Workflow ID (historical name)
     generation_type: GenerationType
     model_name: str
     token_usage: TokenUsage
@@ -151,6 +151,8 @@ class MonitoringService:
     def __init__(self):
         self._supabase = None
         self._logger = get_logger(f"{__name__}.MonitoringService")
+        # If schema is missing, disable further inserts to avoid log spam
+        self._disabled_reason: Optional[str] = None
     
     @property
     def supabase(self):
@@ -288,9 +290,13 @@ class MonitoringService:
     async def _store_record(self, record: UsageRecord) -> None:
         """Store usage record in database."""
         try:
-            data = {
+            if self._disabled_reason:
+                self._logger.debug(
+                    f"Monitoring disabled (reason={self._disabled_reason}); skipping store"
+                )
+                return
+            base = {
                 "id": record.id,
-                "video_id": record.video_id,
                 "generation_type": record.generation_type.value,
                 "model_name": record.model_name,
                 "input_tokens": record.token_usage.input_tokens,
@@ -304,28 +310,48 @@ class MonitoringService:
                 "metadata": record.metadata,
                 "created_at": record.created_at.isoformat(),
             }
-            
-            self.supabase.table(self.TABLE_NAME).insert(data).execute()
+            # Prefer workflow_id column; fallback to legacy video_id if needed
+            try:
+                data = {**base, "workflow_id": record.video_id}
+                self.supabase.table(self.TABLE_NAME).insert(data).execute()
+            except Exception as e1:
+                msg1 = str(e1)
+                if 'column "workflow_id" does not exist' in msg1.lower():
+                    data = {**base, "video_id": record.video_id}
+                    self.supabase.table(self.TABLE_NAME).insert(data).execute()
+                else:
+                    raise
             self._logger.debug(f"Stored usage record: {record.id}")
             
         except Exception as e:
-            self._logger.warning(f"Failed to store usage record: {e}")
+            msg = str(e)
+            self._logger.warning(f"Failed to store usage record: {msg}")
+            if "PGRST205" in msg or "Could not find the table 'public.usage_metrics'" in msg:
+                self._disabled_reason = "missing_table"
+                self._logger.error(
+                    "Monitoring table missing. Apply migration: Backend/migrations/usage_metrics.sql. "
+                    "Until then, usage metrics will not be persisted."
+                )
     
     async def get_workflow_usage(self, video_id: str) -> dict[str, Any]:
         """Get aggregated usage for a workflow."""
         try:
-            response = (
-                self.supabase.table(self.TABLE_NAME)
-                .select("*")
-                .eq("video_id", video_id)
-                .execute()
-            )
+            # Prefer workflow_id filter, fallback to video_id
+            table = self.supabase.table(self.TABLE_NAME).select("*")
+            try:
+                response = table.eq("workflow_id", video_id).execute()
+            except Exception:
+                response = table.eq("video_id", video_id).execute()
             
             records = response.data or []
             
             return self._aggregate_records(records)
             
         except Exception as e:
+            msg = str(e)
+            if "PGRST205" in msg or "Could not find the table 'public.usage_metrics'" in msg:
+                self._logger.warning("Usage metrics table missing; returning empty usage summary")
+                return self._aggregate_records([])
             self._logger.error(f"Failed to get workflow usage: {e}")
             return {"error": str(e)}
     
@@ -349,19 +375,23 @@ class MonitoringService:
             return self._aggregate_records(records)
             
         except Exception as e:
+            msg = str(e)
+            if "PGRST205" in msg or "Could not find the table 'public.usage_metrics'" in msg:
+                self._logger.warning("Usage metrics table missing; returning empty summary")
+                return self._aggregate_records([])
             self._logger.error(f"Failed to get usage summary: {e}")
             return {"error": str(e)}
     
     def _aggregate_records(self, records: list[dict]) -> dict[str, Any]:
-        """Aggregate usage records into summary."""
+        """Aggregate usage records into summary suitable for API and UI."""
         summary = {
             "total_records": len(records),
             "total_cost_usd": 0.0,
             "total_tokens": 0,
             "by_type": {},
             "by_model": {},
-            "success_rate": 0.0,
-            "cache_hit_rate": 0.0,
+            "success_rate": 0.0,  # percent (legacy)
+            "cache_hit_rate": 0.0,  # percent (legacy)
         }
         
         if not records:
@@ -370,15 +400,22 @@ class MonitoringService:
         success_count = 0
         cache_hits = 0
         research_count = 0
-        
+        total_duration = 0.0
+        video_count = 0
+        video_success = 0
+        video_fail = 0
+        video_cost = 0.0
+
         for record in records:
             gen_type = record.get("generation_type", "unknown")
             model = record.get("model_name", "unknown")
             cost = record.get("cost_usd", 0) or 0
             tokens = record.get("total_tokens", 0) or 0
-            
+            duration = float(record.get("duration_seconds") or 0.0)
+
             summary["total_cost_usd"] += cost
             summary["total_tokens"] += tokens
+            total_duration += duration
             
             # By type
             if gen_type not in summary["by_type"]:
@@ -411,13 +448,61 @@ class MonitoringService:
                 metadata = record.get("metadata") or {}
                 if metadata.get("cache_hit"):
                     cache_hits += 1
+            if gen_type == "video":
+                video_count += 1
+                video_cost += cost
+                if record.get("success"):
+                    video_success += 1
+                else:
+                    video_fail += 1
         
         summary["total_cost_usd"] = round(summary["total_cost_usd"], 4)
-        summary["success_rate"] = round(success_count / len(records) * 100, 2)
-        
+        summary["success_rate"] = round((success_count / len(records)) * 100, 2)
+
         if research_count > 0:
-            summary["cache_hit_rate"] = round(cache_hits / research_count * 100, 2)
+            summary["cache_hit_rate"] = round((cache_hits / research_count) * 100, 2)
         
+        # Extended fields for Frontend UI
+        totals = {
+            "total_tokens": summary["total_tokens"],
+            "total_cost_usd": summary["total_cost_usd"],
+            "total_videos": video_count,
+            "completed_videos": video_success,
+            "failed_videos": video_fail,
+        }
+        # Normalize by_type/by_model to shapes expected by UI when possible
+        by_generation_type = {}
+        for k, v in summary["by_type"].items():
+            by_generation_type[k] = {
+                "tokens": v.get("tokens", 0),
+                "cost_usd": round(v.get("cost_usd", 0.0), 4),
+                "count": v.get("count", 0),
+            }
+        by_model = {}
+        for k, v in summary["by_model"].items():
+            by_model[k] = {
+                "tokens": v.get("tokens", 0),
+                "cost_usd": round(v.get("cost_usd", 0.0), 4),
+                "calls": v.get("count", 0),
+            }
+        avg_generation_time_seconds = round(total_duration / max(1, len(records)), 2)
+        avg_cost_per_video_usd = round(video_cost / max(1, video_count), 4)
+        metrics = {
+            "success_rate": round(success_count / max(1, len(records)), 4),  # fraction 0..1
+            "cache_hit_rate": round(cache_hits / max(1, research_count), 4) if research_count else 0.0,
+            "avg_generation_time_seconds": avg_generation_time_seconds,
+            "avg_cost_per_video_usd": avg_cost_per_video_usd,
+        }
+        # Attach UI-friendly keys without breaking existing consumers
+        summary.update(
+            {
+                "totals": totals,
+                "by_generation_type": by_generation_type,
+                "by_model": by_model,
+                "metrics": metrics,
+            }
+        )
+
         return summary
 
 

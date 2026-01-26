@@ -115,8 +115,11 @@ class DeepResearchAgent:
         
         try:
             ttl = self._settings.cache_ttl_research
-            await self._redis.set(cache_key, result, ttl=ttl)
-            logger.info(f"Cached research result: {cache_key} (TTL={ttl}s)")
+            ok = await self._redis.set(cache_key, result, ttl=ttl)
+            if ok:
+                logger.info(f"Cached research result: {cache_key} (TTL={ttl}s)")
+            else:
+                logger.warning(f"Cache set unsuccessful: {cache_key}")
         except Exception as e:
             logger.warning(f"Cache set failed: {e}")
     
@@ -239,8 +242,76 @@ class DeepResearchAgent:
         return hybrid_output, image_urls
     
     def _result_to_dict(self, result: ResearchResult) -> dict[str, Any]:
-        """Convert research result to dictionary for state storage."""
-        return result.model_dump(mode="json")
+        """Convert research result to dictionary for state storage.
+
+        Normalizes creative/hybrid outputs to include common display fields
+        so logs/UI have meaningful content regardless of strategy.
+        """
+        data = result.model_dump(mode="json")
+        try:
+            from app.models.research import (
+                CreativeIdeationOutput,
+                HybridResearchOutput,
+            )
+            # Creative: synthesize summary and findings-like display
+            if isinstance(result, CreativeIdeationOutput):
+                story = (data.get("story_concept") or "").strip()
+                arc = data.get("narrative_arc") or {}
+                hook = (arc.get("hook") or "").strip() if isinstance(arc, dict) else ""
+                exec_summary = " | ".join([p for p in [story, f"Hook: {hook}" if hook else ""] if p])
+
+                findings: list[dict[str, Any]] = []
+                chars = data.get("characters") or []
+                if chars:
+                    char_facts: list[str] = []
+                    for ch in chars[:3]:
+                        name = ch.get("name") or "Character"
+                        appearance = (ch.get("appearance") or "").strip()
+                        personality = (ch.get("personality") or "").strip()
+                        desc = ", ".join([p for p in [appearance, personality] if p]) or "Character present"
+                        char_facts.append(f"{name}: {desc}")
+                    findings.append({
+                        "topic_segment": "Characters",
+                        "key_facts": char_facts,
+                        "citations": [],
+                        "confidence": 0.6,
+                    })
+                scenes = data.get("scenes") or []
+                if scenes:
+                    scene_facts = []
+                    for s in scenes[:3]:
+                        desc = (s.get("description") or "").strip()
+                        if desc:
+                            scene_facts.append(desc[:200])
+                    if scene_facts:
+                        findings.append({
+                            "topic_segment": "Scenes",
+                            "key_facts": scene_facts,
+                            "citations": [],
+                            "confidence": 0.55,
+                        })
+                # Map creative fields to common display keys
+                data.update({
+                    "executive_summary": exec_summary,
+                    "research_findings": findings,
+                    "visual_elements": data.get("visual_inspiration") or [],
+                    "interesting_angles": (arc.get("emotional_beats") or []) if isinstance(arc, dict) else [],
+                    "total_sources": 0,
+                })
+            # Hybrid: surface factual base for display fields
+            elif isinstance(result, HybridResearchOutput):
+                factual = data.get("factual_base") or {}
+                creative = data.get("creative_extension") or {}
+                data.update({
+                    "executive_summary": factual.get("executive_summary") or creative.get("story_concept") or "",
+                    "visual_elements": factual.get("visual_elements") or creative.get("visual_inspiration") or [],
+                    "interesting_angles": factual.get("interesting_angles") or [],
+                    "research_findings": factual.get("research_findings") or [],
+                    "total_sources": factual.get("total_sources") or 0,
+                })
+        except Exception as e:
+            logger.warning(f"Failed to normalize research result for display: {e}")
+        return data
     
     async def _persist_to_supabase(
         self,
@@ -309,11 +380,25 @@ class DeepResearchAgent:
                 "deep_research": utc_now_iso(),
             }
             logger.info("Returning cached research result")
+            # Monitoring: record cache-hit research usage
+            try:
+                from app.services.monitoring import get_monitoring_service
+                await get_monitoring_service().record_research_usage(
+                    video_id=workflow_id,
+                    model="deep-research-pro-preview",
+                    duration_seconds=0.0,
+                    success=True,
+                    cache_hit=True,
+                    metadata={"strategy": strategy.value},
+                )
+            except Exception as me:
+                logger.warning(f"Monitoring research cache-hit failed: {me}")
             return state
         
         result: ResearchResult
         image_urls: list[str]
         
+        start_time = __import__("time").time()
         if strategy == ResearchStrategy.FACTUAL:
             result, image_urls = await self._execute_factual_research(state)
         elif strategy == ResearchStrategy.CREATIVE:
@@ -338,11 +423,25 @@ class DeepResearchAgent:
             **state.get("phase_timestamps", {}),
             "deep_research": utc_now_iso(),
         }
-        
+
         logger.info(f"Deep Research Agent completed for workflow: {workflow_id}")
         logger.info(f"  Strategy used: {strategy.value}")
         logger.info(f"  Images found: {len(image_urls)}")
-        
+        # Monitoring: record research usage (non-cache)
+        try:
+            from app.services.monitoring import get_monitoring_service
+            elapsed = __import__("time").time() - start_time
+            await get_monitoring_service().record_research_usage(
+                video_id=workflow_id,
+                model="deep-research-pro-preview",
+                duration_seconds=elapsed,
+                success=True,
+                cache_hit=False,
+                metadata={"strategy": strategy.value},
+            )
+        except Exception as me:
+            logger.warning(f"Monitoring research usage failed: {me}")
+
         return state
 
 

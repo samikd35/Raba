@@ -143,7 +143,7 @@ DEFAULT_TOOLS: list[ToolMetadata] = [
     ToolMetadata(
         tool_id="surreal_impossible_sims",
         tool_name="Impossible Simulations",
-        category=CategoryEnum.SURREAL_REALISM,
+        category=CategoryEnum.REALISTIC,  # Updated from SURREAL_REALISM
         description="Visualize invisible forces and impossible physical phenomena with photorealistic grounding. Perfect for science, physics, and 'what if' scenarios.",
         capabilities=ToolCapabilities(
             flow_visualization=True,
@@ -167,7 +167,7 @@ Maintain scientific accuracy with visual wonder. Focus on {focus_area}.""",
     ToolMetadata(
         tool_id="anime_concept_combat",
         tool_name="Concept Combat",
-        category=CategoryEnum.HIGH_OCTANE_ANIME,
+        category=CategoryEnum.ANIME,  # Updated from HIGH_OCTANE_ANIME
         description="Transform abstract ideas into high-energy Sakuga-style battles. Ideal for philosophy, debates, historical conflicts, and conceptual showdowns.",
         capabilities=ToolCapabilities(
             philosophical_debates=True,
@@ -191,7 +191,7 @@ Dynamic camera movements with elemental explosions. Scientific laws warp visuall
     ToolMetadata(
         tool_id="stylized_data_dioramas",
         tool_name="Data Dioramas",
-        category=CategoryEnum.STYLIZED_3D,
+        category=CategoryEnum.ANIMATION,  # Updated from STYLIZED_3D
         description="Transform statistics and data into miniature physical landscapes. Great for economic trends, demographics, and comparative analysis.",
         capabilities=ToolCapabilities(
             miniature_worlds=True,
@@ -565,7 +565,7 @@ class IntentToolSelectorAgent:
         return (keyword_score * 0.6) + (topic_score * 0.4)
     
     def _get_fallback_tool(self) -> ToolMetadata:
-        """Get the default fallback tool (Surreal Realism)."""
+        """Get the default fallback tool (Realistic category - most flexible)."""
         fallback = next(
             (t for t in self.tools if t.tool_id == "surreal_impossible_sims"),
             None

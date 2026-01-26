@@ -169,7 +169,7 @@ def route_after_style_anchor(
     if script.get("lead_character"):
         logger.info("Lead character detected; routing to Character Reference")
         return NODE_CHARACTER_REFERENCE
-    logger.info("Routing to Image Generator")
+    logger.info("No lead character; skipping Character Reference and routing to Image Generator")
     return NODE_IMAGE_GENERATOR
 
 

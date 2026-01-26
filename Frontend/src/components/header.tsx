@@ -9,7 +9,7 @@ export function Header() {
             <div className="flex items-center gap-2">
                 {/* We can envision a logo here if needed, or just the text RABA */}
                 <span className="font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent text-xl truncate">
-                    RABA
+                    SAM
                 </span>
             </div>
             <div className="flex items-center gap-2">

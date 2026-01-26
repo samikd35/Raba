@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
+from app.models.text_overlay import TextOverlay
 
 
 class HookArchetype(str, Enum):
@@ -254,13 +255,26 @@ class ScriptOutput(BaseModel):
         ...,
         description="Call-to-action section"
     )
+    # Optional: structured text overlays for post-processing
+    text_overlays: list[TextOverlay] = Field(
+        default_factory=list,
+        description="Structured text overlays to add in post-processing",
+    )
     lead_character: Optional[str] = Field(
         default=None,
-        description="Optional lead character name for consistency"
+        description=(
+            "Name of the PRIMARY HUMAN OR HUMANOID CHARACTER who appears consistently "
+            "throughout the video and requires visual consistency. ONLY populate if there is an "
+            "actual person, human figure, or humanoid entity. DO NOT populate for: products, "
+            "vehicles, objects, abstract concepts, brand names, evolution sequences, or non-animate subjects."
+        ),
     )
     lead_character_description: Optional[str] = Field(
         default=None,
-        description="Optional description for the lead character"
+        description=(
+            "Physical appearance description of the lead character. Include: age, gender, ethnicity, "
+            "clothing, distinctive features. ONLY populate if lead_character is a human/humanoid."
+        ),
     )
     
     viral_metrics: ViralMetrics = Field(

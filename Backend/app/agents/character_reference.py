@@ -1,6 +1,7 @@
 """Character Reference Generator Agent.
 
 Generates a character reference sheet if the script identifies a lead character.
+Includes semantic validation to prevent generating sheets for non-character content.
 """
 
 from typing import Any
@@ -9,15 +10,88 @@ from app.graph.state import VideoGenerationState
 from app.models.overlay import CharacterReferenceImage, CharacterReferenceSheet
 from app.models.image import ImageGenerationConfig, ImageModel, ImageAspectRatio, ImageResolution, StyleReference
 from app.services.nano_banana import get_nano_banana_service
+from app.services.gemini import get_gemini_service
 from app.services.supabase import get_supabase_client
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+# Validation result model for semantic character validation
+from pydantic import BaseModel, Field
+
+
+class CharacterValidationResult(BaseModel):
+    """Result of semantic character validation."""
+    is_valid_character: bool = Field(
+        description="Whether this is a valid human/humanoid character for reference sheet generation"
+    )
+    character_type: str = Field(
+        description="Type: 'human', 'humanoid', 'animal', 'object', 'abstract', 'product', 'none'"
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0,
+        description="Confidence score for the validation decision"
+    )
+    reasoning: str = Field(
+        description="Brief explanation of why this is or isn't a valid character"
+    )
+    suggested_action: str = Field(
+        description="'generate' to create reference sheet, 'skip' to bypass"
+    )
+
+
+CHARACTER_VALIDATION_PROMPT = """You are a character validation expert for a video generation system.
+
+Your task is to determine if a \"lead character\" extracted from a script is actually a human or humanoid character that would benefit from a character reference sheet (front view, side view, back view, face close-up).
+
+## Context Provided
+- **Original Topic:** {topic}
+- **Lead Character Name:** {lead_character}
+- **Lead Character Description:** {lead_character_description}
+- **Script Summary:** {script_summary}
+- **Visual Style Category:** {category}
+
+## What is a Character Reference Sheet?
+A character reference sheet shows a character from multiple angles (front, side, back, face) to ensure visual consistency across video scenes. It uses poses like T-pose and neutral expressions.
+
+## Valid Characters (GENERATE reference sheet)
+- Human persons: historical figures, fictional people, narrators shown on screen
+- Humanoid entities: robots with human form, androids, aliens with humanoid bodies
+- Animated human characters with consistent appearance
+
+## Invalid \"Characters\" (SKIP reference sheet)
+- Products: vehicles, phones, shoes, electronics
+- Objects: buildings, logos, artifacts
+- Abstract concepts: \"The Evolution\", \"Time\", \"Innovation\", \"The Journey\"
+- Brand personifications: \"The Tesla Lineage\", \"Apple's Vision\", \"Nike's Spirit\"
+- Transforming/morphing subjects: \"The Morphing Car\", \"Design Evolution\"
+- Multiple different people without a single consistent lead
+- Narrators who are voice-only (not shown on screen)
+
+## Analysis Required
+1. What is the video actually about? (products, story, concept, etc.)
+2. Is the \"lead character\" a real person/humanoid or a conceptual/product entity?
+3. Would front/side/back/face reference views make sense for this subject?
+4. Could this subject realistically do a \"T-pose\" or have a \"face close-up\"?
+
+## Response Format
+Respond with a JSON object:
+{{
+    "is_valid_character": true/false,
+    "character_type": "human|humanoid|animal|object|abstract|product|none",
+    "confidence": 0.0-1.0,
+    "reasoning": "Brief explanation",
+    "suggested_action": "generate|skip"
+}}
+
+Analyze the provided context and determine if a character reference sheet should be generated."""
+
+
 class CharacterReferenceGeneratorAgent:
     def __init__(self):
         self.nano = get_nano_banana_service()
+        self.gemini = get_gemini_service()
         self.supabase = get_supabase_client()
         logger.info("CharacterReferenceGeneratorAgent initialized")
 
@@ -29,6 +103,24 @@ class CharacterReferenceGeneratorAgent:
         if not name:
             logger.info("No lead character detected; skipping character reference generation")
             return {}
+
+        # Semantic validation to ensure this is a real character, not a product/abstract
+        validation_result = await self._validate_character_with_context(
+            state=state,
+            lead_character=name,
+            lead_character_description=desc,
+        )
+
+        if not validation_result.is_valid_character:
+            logger.warning(
+                f"Character validation FAILED for '{name}': {validation_result.reasoning} "
+                f"(type={validation_result.character_type}, confidence={validation_result.confidence:.2f})"
+            )
+            return {
+                "character_validation": validation_result.model_dump(),
+                "character_reference_skipped": True,
+                "skip_reason": validation_result.reasoning,
+            }
 
         category = (state.get("selected_tool") or {}).get("category") or state.get("category", "surreal_realism")
         aspect_ratio = state.get("aspect_ratio", "9:16")
@@ -80,7 +172,10 @@ class CharacterReferenceGeneratorAgent:
             character_name=name,
             character_description=desc,
             reference_images=refs,
-            character_metadata={"category": category},
+            character_metadata={
+                "category": category,
+                "validation": validation_result.model_dump(),
+            },
         )
         logger.info(f"Character reference sheet created for {name} with {len(refs)} views")
         
@@ -89,7 +184,76 @@ class CharacterReferenceGeneratorAgent:
         
         return {
             "character_reference_sheet": sheet.model_dump(),
+            "character_validation": validation_result.model_dump(),
         }
+
+    async def _validate_character_with_context(
+        self,
+        state: VideoGenerationState,
+        lead_character: str,
+        lead_character_description: str,
+    ) -> CharacterValidationResult:
+        """Use Gemini to semantically validate if the lead character warrants a reference sheet."""
+        try:
+            # Extract context
+            topic = state.get("topic", "") or state.get("user_prompt", "") or ""
+            script = state.get("script_output", {}) or {}
+            category = (state.get("selected_tool") or {}).get("category") or state.get("category", "")
+
+            # Summarize script
+            script_summary = self._build_script_summary(script)
+
+            prompt = CHARACTER_VALIDATION_PROMPT.format(
+                topic=topic or "Not provided",
+                lead_character=lead_character,
+                lead_character_description=lead_character_description or "Not provided",
+                script_summary=script_summary or "Not provided",
+                category=category or "Not provided",
+            )
+
+            resp = await self.gemini.generate_structured_output(
+                prompt=prompt,
+                response_model=CharacterValidationResult,
+                temperature=0.1,
+                video_id=state.get("workflow_id"),
+            )
+            return resp
+        except Exception as e:
+            logger.error(f"Character validation failed with error: {e}")
+            return CharacterValidationResult(
+                is_valid_character=False,
+                character_type="error",
+                confidence=0.0,
+                reasoning=f"Validation error: {str(e)}; skipping as precaution",
+                suggested_action="skip",
+            )
+
+    def _build_script_summary(self, script: dict) -> str:
+        """Build a concise summary of the script for validation context."""
+        parts: list[str] = []
+        try:
+            hook = script.get("hook", {}) or {}
+            if hook:
+                parts.append(
+                    f"Hook: {hook.get('script', '')} - {hook.get('visual_direction', '')}"
+                )
+
+            scenes = script.get("scenes", []) or []
+            for i, scene in enumerate(scenes[:4]):
+                desc = scene.get("description", "") or ""
+                dialogue = scene.get("dialogue", "") or ""
+                o = f"Scene {i+1}: {desc}"
+                if dialogue:
+                    o += f" | Dialogue: {dialogue}"
+                parts.append(o)
+
+            cta = script.get("call_to_action", {}) or {}
+            if cta and cta.get("script"):
+                parts.append(f"CTA: {cta.get('script')}")
+        except Exception:
+            # If script is malformed, just return empty summary
+            pass
+        return "\n".join([p for p in parts if p])
     
     async def _persist_to_database(
         self,

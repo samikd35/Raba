@@ -77,6 +77,8 @@ class GeminiService:
         thinking_budget: int = 0,
         temperature: float = 1.0,
         max_retries: int = 3,
+        *,
+        video_id: Optional[str] = None,
     ) -> T:
         """
         Generate structured output matching a Pydantic model.
@@ -123,6 +125,7 @@ class GeminiService:
             config["system_instruction"] = system_instruction
         
         last_error = None
+        start_time = asyncio.get_event_loop().time()
         for attempt in range(max_retries):
             try:
                 logger.debug(f"Gemini API call attempt {attempt + 1}/{max_retries}")
@@ -142,6 +145,29 @@ class GeminiService:
                 
                 result = response_model.model_validate_json(response.text)
                 logger.info(f"Successfully parsed {response_model.__name__}")
+                # Monitoring: estimate token usage and record
+                try:
+                    from app.services.monitoring import get_monitoring_service
+                    duration = asyncio.get_event_loop().time() - start_time
+                    in_tok = self._estimate_tokens(f"{system_instruction or ''}\n{prompt}")
+                    out_tok = self._estimate_tokens(response.text)
+                    asyncio.create_task(
+                        get_monitoring_service().record_text_usage(
+                            video_id=video_id,
+                            model=model,
+                            input_tokens=in_tok,
+                            output_tokens=out_tok,
+                            duration_seconds=duration,
+                            success=True,
+                            metadata={
+                                "method": "generate_structured_output",
+                                "response_model": response_model.__name__,
+                                "estimated": True,
+                            },
+                        )
+                    )
+                except Exception:
+                    pass
                 return result
                 
             except Exception as e:
@@ -150,6 +176,25 @@ class GeminiService:
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1 * (attempt + 1))
         
+        # Monitoring on failure
+        try:
+            from app.services.monitoring import get_monitoring_service
+            duration = asyncio.get_event_loop().time() - start_time
+            in_tok = self._estimate_tokens(f"{system_instruction or ''}\n{prompt}")
+            asyncio.create_task(
+                get_monitoring_service().record_text_usage(
+                    video_id=video_id,
+                    model=model,
+                    input_tokens=in_tok,
+                    output_tokens=0,
+                    duration_seconds=duration,
+                    success=False,
+                    error_message=str(last_error),
+                    metadata={"method": "generate_structured_output", "estimated": True},
+                )
+            )
+        except Exception:
+            pass
         if isinstance(last_error, GeminiServiceError):
             raise last_error
         raise GeminiAPIError(f"Failed after {max_retries} attempts: {last_error}")
@@ -162,6 +207,8 @@ class GeminiService:
         thinking_budget: int = 0,
         temperature: float = 1.0,
         max_output_tokens: Optional[int] = None,
+        *,
+        video_id: Optional[str] = None,
     ) -> str:
         """
         Generate plain text response.
@@ -201,6 +248,7 @@ class GeminiService:
         if max_output_tokens:
             config["max_output_tokens"] = max_output_tokens
         
+        start_time = asyncio.get_event_loop().time()
         try:
             response = await asyncio.to_thread(
                 client.models.generate_content,
@@ -209,10 +257,48 @@ class GeminiService:
                 config=config,
             )
             
-            return response.text or ""
+            text = response.text or ""
+            # Monitoring
+            try:
+                from app.services.monitoring import get_monitoring_service
+                duration = asyncio.get_event_loop().time() - start_time
+                in_tok = self._estimate_tokens(f"{system_instruction or ''}\n{prompt}")
+                out_tok = self._estimate_tokens(text)
+                asyncio.create_task(
+                    get_monitoring_service().record_text_usage(
+                        video_id=video_id,
+                        model=model,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        duration_seconds=duration,
+                        success=True,
+                        metadata={"method": "generate_text", "estimated": True},
+                    )
+                )
+            except Exception:
+                pass
+            return text
             
         except Exception as e:
             logger.error(f"Text generation failed: {e}")
+            try:
+                from app.services.monitoring import get_monitoring_service
+                duration = asyncio.get_event_loop().time() - start_time
+                in_tok = self._estimate_tokens(f"{system_instruction or ''}\n{prompt}")
+                asyncio.create_task(
+                    get_monitoring_service().record_text_usage(
+                        video_id=video_id,
+                        model=model,
+                        input_tokens=in_tok,
+                        output_tokens=0,
+                        duration_seconds=duration,
+                        success=False,
+                        error_message=str(e),
+                        metadata={"method": "generate_text", "estimated": True},
+                    )
+                )
+            except Exception:
+                pass
             raise GeminiAPIError(f"Text generation failed: {e}")
     
     async def generate_with_grounding(
@@ -221,6 +307,8 @@ class GeminiService:
         model: str = GEMINI_3_PRO,
         system_instruction: Optional[str] = None,
         thinking_budget: int = 8192,
+        *,
+        video_id: Optional[str] = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """
         Generate text with Google Search grounding.
@@ -256,6 +344,7 @@ class GeminiService:
         if system_instruction:
             config["system_instruction"] = system_instruction
         
+        start_time = asyncio.get_event_loop().time()
         try:
             response = await asyncio.to_thread(
                 client.models.generate_content,
@@ -280,11 +369,61 @@ class GeminiService:
                                 })
             
             logger.info(f"Generated grounded response with {len(citations)} citations")
+            # Monitoring
+            try:
+                from app.services.monitoring import get_monitoring_service
+                duration = asyncio.get_event_loop().time() - start_time
+                in_tok = self._estimate_tokens(f"{system_instruction or ''}\n{prompt}")
+                out_tok = self._estimate_tokens(text)
+                asyncio.create_task(
+                    get_monitoring_service().record_text_usage(
+                        video_id=video_id,
+                        model=model,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        duration_seconds=duration,
+                        success=True,
+                        metadata={
+                            "method": "generate_with_grounding",
+                            "citations": len(citations),
+                            "estimated": True,
+                        },
+                    )
+                )
+            except Exception:
+                pass
             return text, citations
             
         except Exception as e:
             logger.error(f"Grounded generation failed: {e}")
+            try:
+                from app.services.monitoring import get_monitoring_service
+                duration = asyncio.get_event_loop().time() - start_time
+                in_tok = self._estimate_tokens(f"{system_instruction or ''}\n{prompt}")
+                asyncio.create_task(
+                    get_monitoring_service().record_text_usage(
+                        video_id=video_id,
+                        model=model,
+                        input_tokens=in_tok,
+                        output_tokens=0,
+                        duration_seconds=duration,
+                        success=False,
+                        error_message=str(e),
+                        metadata={"method": "generate_with_grounding", "estimated": True},
+                    )
+                )
+            except Exception:
+                pass
             raise GeminiAPIError(f"Grounded generation failed: {e}")
+
+    def _estimate_tokens(self, text: Optional[str]) -> int:
+        if not text:
+            return 0
+        # Rough heuristic: ~4 characters per token
+        try:
+            return max(0, int(len(text) / 4))
+        except Exception:
+            return 0
     
     def generate_structured_output_sync(
         self,

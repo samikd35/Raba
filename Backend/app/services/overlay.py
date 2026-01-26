@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
+import aiohttp
 from app.models.overlay import OverlayItem
+from app.models.text_overlay import TextOverlay
+from app.services.text_overlay import get_text_overlay_service
+from app.services.supabase import get_supabase_client
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -48,15 +52,76 @@ class VideoCompositorService:
     In environments without image overlays, returns the clean video URL unchanged.
     """
 
-    async def composite(self, clean_video_url: str, overlays: Iterable[OverlayItem]) -> str:
-        # Placeholder: pass-through URL; a real implementation would download clean
-        # video, render overlay images, and use ffmpeg filter_complex drawtext or overlay.
-        count = len(list(overlays))
-        if count == 0:
+    async def composite(
+        self,
+        clean_video_url: str,
+        overlays: Iterable[OverlayItem],
+        *,
+        workflow_id: Optional[str] = None,
+    ) -> str:
+        """Composite overlays onto the clean video and return a new storage URL.
+
+        If ffmpeg is unavailable or any step fails, returns the original URL.
+        """
+        items = list(overlays or [])
+        if not items:
             logger.info("No overlays provided; returning clean video URL")
             return clean_video_url
-        logger.info(f"Compositor received {count} overlays; returning clean video (no-op)")
-        return clean_video_url
+
+        # Download the clean video
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(clean_video_url) as resp:
+                    if resp.status != 200:
+                        logger.warning(
+                            f"Failed to download clean video for compositing: {resp.status}"
+                        )
+                        return clean_video_url
+                    video_bytes = await resp.read()
+        except Exception as e:
+            logger.warning(f"Compositor download failed: {e}")
+            return clean_video_url
+
+        # Convert to TextOverlay with defaults
+        text_overlays: list[TextOverlay] = [
+            TextOverlay(
+                text=i.text,
+                start_time=i.start_time,
+                end_time=i.end_time,
+                position=(40, 40) if i.position.value == "top" else (40, 1000 if i.position.value == "bottom" else 600),
+                font_size=48,
+                font_color="white",
+                background_color="black@0.5",
+                animation="fade_in",
+            )
+            for i in items
+        ]
+
+        # Apply overlays with FFmpeg (graceful fallback inside service)
+        try:
+            svc = get_text_overlay_service()
+            out_bytes = await svc.add_text_overlays(video_bytes, text_overlays)
+        except Exception as e:
+            logger.warning(f"Text overlay application failed: {e}")
+            return clean_video_url
+
+        # Upload new video to storage
+        try:
+            supabase = get_supabase_client()
+            bucket = "media"
+            folder = (
+                f"videos/{workflow_id}" if workflow_id else "generated_videos"
+            )
+            storage_path = f"{folder}/final_composited_{__import__('time').time():.0f}.mp4"
+            supabase.storage.from_(bucket).upload(
+                path=storage_path, file=out_bytes, file_options={"content-type": "video/mp4"}
+            )
+            public_url = supabase.storage.from_(bucket).get_public_url(storage_path)
+            logger.info("Uploaded composited video to storage")
+            return public_url
+        except Exception as e:
+            logger.warning(f"Upload of composited video failed; returning clean URL: {e}")
+            return clean_video_url
 
 
 _overlay_generator: Optional[OverlayGeneratorService] = None
@@ -75,4 +140,3 @@ def get_video_compositor() -> VideoCompositorService:
     if _video_compositor is None:
         _video_compositor = VideoCompositorService()
     return _video_compositor
-

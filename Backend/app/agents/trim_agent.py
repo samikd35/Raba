@@ -29,7 +29,14 @@ class TrimAgent:
 
         try:
             # Download, trim, upload
-            data = await self.veo.download_video(video_output.get("video", {}))
+            # IMPORTANT: At this stage we only have the persisted video URL,
+            # not the SDK's GeneratedVideo object. Download via HTTP.
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=120) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"HTTP {resp.status} downloading video")
+                    data = await resp.read()
             # First, hard trim to target duration to remove overrun
             data = await self.trimmer.trim_to_duration(data, target_duration)
             # Then, optional edge trim to remove jitter

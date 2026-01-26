@@ -1,0 +1,83 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.config (
+  key character varying NOT NULL,
+  value jsonb NOT NULL,
+  description text,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT config_pkey PRIMARY KEY (key)
+);
+CREATE TABLE public.media (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workflow_id uuid NOT NULL,
+  media_type character varying NOT NULL CHECK (media_type::text = ANY (ARRAY['image'::character varying, 'video'::character varying, 'audio'::character varying]::text[])),
+  source character varying NOT NULL CHECK (source::text = ANY (ARRAY['user_upload'::character varying, 'research'::character varying, 'generated'::character varying]::text[])),
+  storage_url text NOT NULL,
+  storage_bucket character varying,
+  storage_path text,
+  file_size_bytes bigint,
+  mime_type character varying,
+  width integer,
+  height integer,
+  duration_seconds double precision,
+  metadata jsonb,
+  generation_prompt text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT media_pkey PRIMARY KEY (id),
+  CONSTRAINT media_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES public.workflows(id)
+);
+CREATE TABLE public.tools (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tool_id character varying NOT NULL UNIQUE,
+  tool_name character varying NOT NULL,
+  category character varying NOT NULL CHECK (category::text = ANY (ARRAY['surreal_realism'::character varying, 'high_octane_anime'::character varying, 'stylized_3d'::character varying]::text[])),
+  description text,
+  capabilities jsonb,
+  script_prompt_template text,
+  image_prompt_template text,
+  video_prompt_template text,
+  is_active boolean NOT NULL DEFAULT true,
+  priority integer DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  version integer DEFAULT 1,
+  usage_count integer DEFAULT 0,
+  success_rate double precision DEFAULT 0.0,
+  parameters_schema jsonb,
+  original_idea text,
+  created_by uuid,
+  improvement_history jsonb DEFAULT '[]'::jsonb,
+  last_improved_at timestamp with time zone,
+  CONSTRAINT tools_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.workflows (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  status character varying NOT NULL DEFAULT 'pending'::character varying,
+  topic text NOT NULL,
+  duration_seconds integer NOT NULL DEFAULT 18 CHECK (duration_seconds >= 8 AND duration_seconds <= 60),
+  aspect_ratio character varying NOT NULL DEFAULT '9:16'::character varying CHECK (aspect_ratio::text = ANY (ARRAY['9:16'::character varying, '16:9'::character varying]::text[])),
+  resolution character varying NOT NULL DEFAULT '1080p'::character varying CHECK (resolution::text = ANY (ARRAY['720p'::character varying, '1080p'::character varying]::text[])),
+  category character varying NOT NULL DEFAULT 'auto'::character varying,
+  hitl_mode character varying NOT NULL DEFAULT 'auto'::character varying CHECK (hitl_mode::text = ANY (ARRAY['auto'::character varying, 'manual'::character varying]::text[])),
+  enable_audio boolean NOT NULL DEFAULT true,
+  enable_subtitles boolean NOT NULL DEFAULT false,
+  user_reference_image_url text,
+  tool_selection jsonb,
+  research_output jsonb,
+  research_images jsonb,
+  script_output jsonb,
+  generated_images jsonb,
+  video_output jsonb,
+  current_hitl_gate character varying,
+  hitl_feedback jsonb DEFAULT '[]'::jsonb,
+  error text,
+  error_details jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  completed_at timestamp with time zone,
+  deleted_at timestamp with time zone,
+  user_selected_tool_id text,
+  character_reference_sheet jsonb,
+  CONSTRAINT workflows_pkey PRIMARY KEY (id)
+);

@@ -25,7 +25,9 @@ class VideoCompositorAgent:
         clean = state.get("clean_video_url") or state.get("final_video_url")
         items = state.get("subtitle_overlays", []) or []
         overlays = [OverlayItem(**i) for i in items]
-        final_url = await self.compositor.composite(clean, overlays)
+        final_url = await self.compositor.composite(
+            clean, overlays, workflow_id=state.get("workflow_id")
+        )
         from app.utils.helpers import utc_now_iso
         return {
             "final_video_url": final_url,
@@ -39,4 +41,3 @@ class VideoCompositorAgent:
 async def video_compositor_node(state: VideoGenerationState) -> dict[str, Any]:
     agent = VideoCompositorAgent()
     return await agent.run(state)
-

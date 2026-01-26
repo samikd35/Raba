@@ -12,6 +12,21 @@ import { PlusCircle, Search, Clock, Film } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorkflowState } from '@/hooks/use-workflow'
 
+const categoryDisplayNames: Record<string, string> = {
+    realistic: 'Realistic',
+    anime: 'Anime',
+    animation: 'Animation',
+    surreal_realism: 'Realistic',
+    high_octane_anime: 'Anime',
+    stylized_3d: 'Animation',
+    auto: 'Auto',
+}
+
+const formatCategory = (category: string | undefined): string => {
+    if (!category) return 'Auto'
+    return categoryDisplayNames[category] || category.replace('_', ' ')
+}
+
 interface WorkflowsResponse {
     workflows: WorkflowState[]
     total: number
@@ -97,8 +112,8 @@ export default function WorkflowsPage() {
                                             <Clock className="h-3 w-3" />
                                             {new Date(workflow.created_at).toLocaleDateString()}
                                         </span>
-                                        <span className="capitalize px-1.5 py-0.5 bg-muted rounded">
-                                            {workflow.category?.replace('_', ' ') || 'Auto'}
+                                        <span className="px-1.5 py-0.5 bg-muted rounded">
+                                            {formatCategory(workflow.category)}
                                         </span>
                                     </div>
                                 </CardContent>

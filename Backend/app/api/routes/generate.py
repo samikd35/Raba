@@ -167,7 +167,7 @@ async def create_workflow(
 async def create_workflow_with_image(
     request: Request,
     background_tasks: BackgroundTasks,
-    topic: str = Form(..., min_length=3, max_length=500, description="Video topic"),
+    topic: str = Form(..., min_length=3, max_length=2000, description="Video topic"),
     duration_seconds: int = Form(default=18, ge=8, le=60, description="Duration (8-60s)"),
     aspect_ratio: AspectRatioEnum = Form(default=AspectRatioEnum.VERTICAL),
     resolution: ResolutionEnum = Form(default=ResolutionEnum.FULL_HD),

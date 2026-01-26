@@ -633,7 +633,7 @@ No subtitles, no text overlay.
      duration_seconds: 8-25,
      aspect_ratio: "9:16" | "16:9",
      resolution: "720p" | "1080p",
-     category: "surreal_realism" | "high_octane_anime" | "stylized_3d" | "auto",
+     category: "realistic" | "anime" | "animation" | "auto",  // Simplified categories (Jan 2026)
      hitl_mode: "auto" | "manual",
      enable_audio: bool,
      enable_subtitles: bool,
@@ -723,7 +723,7 @@ class VideoGenerationTool(ABC):
     def __init__(self, config: ToolConfig):
         self.tool_id: str
         self.tool_name: str
-        self.category: str  # "surreal_realism", "high_octane_anime", "stylized_3d"
+        self.category: str  # "realistic", "anime", "animation" (simplified Jan 2026)
         self.capabilities: ToolCapabilities
         self.api_endpoint: str
         self.model_version: str
@@ -1252,6 +1252,18 @@ Raba Project
         └── Output: {video_url, audio_url}
 ```
 
+### 5.6 Character Reference Validation
+
+Purpose: Prevent generating humanoid character sheets for non-character content.
+
+- Trigger: Runs after Global Style Anchor when `script_output.lead_character` is present.
+- Inputs: `topic`, `script_output{hook, scenes, call_to_action}`, `lead_character`, `lead_character_description`, `selected_tool.category`.
+- Engine: `GeminiService.generate_structured_output` with a strict schema to return a decision.
+- Outputs: `character_validation` object `{is_valid_character, character_type, confidence, reasoning, suggested_action}`.
+- Behavior: If `is_valid_character=false`, agent returns `character_reference_skipped=true` and workflow routes forward (no reference images generated). If true, generates front/side/back/face views with Nano Banana and persists to Supabase.
+- Routing: Workflow router remains unchanged; validation is encapsulated inside the Character Reference agent to preserve node contracts.
+- Observability: Validation payload is stored in state and included in `character_metadata.validation` for monitoring.
+
 ---
 
 ## 6. Viral Video Optimization
@@ -1512,12 +1524,20 @@ class UserInputConfig(BaseSettings):
     supported_resolutions: list = ["720p", "1080p"]
     default_resolution: str = "1080p"
     
-    # Content parameters
-    supported_categories: list = ["surreal_realism", "high_octane_anime", "stylized_3d", "auto"]
+    # Content parameters - SIMPLIFIED CATEGORIES (January 2026)
+    # New simplified categories: realistic, anime, animation
+    # Legacy categories (deprecated but still supported for backward compatibility):
+    #   surreal_realism → realistic
+    #   high_octane_anime → anime
+    #   stylized_3d → animation
+    supported_categories: list = ["realistic", "anime", "animation", "auto"]
+    legacy_categories: list = ["surreal_realism", "high_octane_anime", "stylized_3d"]  # Deprecated
     default_category: str = "auto"  # Agent selects best category
     
     # Audio/Subtitle parameters
-    enable_audio: bool = True  # Default: generate audio
+    # NOTE: enable_audio default changed to False for explicit opt-in
+    # Audio stripping implemented via FFmpeg post-processing when enable_audio=False
+    enable_audio: bool = False  # Default: silent video (user must opt-in for audio)
     enable_subtitles: bool = False  # Default: no subtitles
     
     # Reference image
@@ -1635,7 +1655,7 @@ CREATE TABLE workflows (
     duration_seconds INT CHECK (duration_seconds BETWEEN 8 AND 25) DEFAULT 18,
     aspect_ratio VARCHAR(10) DEFAULT '9:16',
     resolution VARCHAR(10) DEFAULT '1080p',
-    category VARCHAR(50) DEFAULT 'auto',  -- surreal_realism, high_octane_anime, stylized_3d, auto
+    category VARCHAR(50) DEFAULT 'auto',  -- realistic, anime, animation, auto (simplified Jan 2026)
     hitl_mode VARCHAR(10) DEFAULT 'auto' CHECK (hitl_mode IN ('auto', 'manual')),
     enable_audio BOOLEAN DEFAULT true,
     enable_subtitles BOOLEAN DEFAULT false,
@@ -1691,7 +1711,8 @@ CREATE TABLE tools (
     tool_id VARCHAR(100) UNIQUE NOT NULL,
     tool_name VARCHAR(200) NOT NULL,
     category VARCHAR(50) NOT NULL CHECK (category IN (
-        'surreal_realism', 'high_octane_anime', 'stylized_3d'
+        'realistic', 'anime', 'animation',
+        'surreal_realism', 'high_octane_anime', 'stylized_3d'  -- Legacy (deprecated)
     )),
     description TEXT,
     capabilities JSONB,  -- {flow_visualization, sakuga_style, etc.}
@@ -1735,7 +1756,7 @@ INSERT INTO config (key, value, description) VALUES
 ('llm_models', '{"intent_tool_selector": "gemini-3-flash-preview", "deep_research": "gemini-3-pro-preview", "script_writer": "gemini-3-flash-preview"}', 'LLM model configuration'),
 ('image_gen', '{"model_fast": "gemini-2.5-flash-image", "model_quality": "gemini-3-pro-image-preview", "min_images": 1, "max_images": 3}', 'Image generation config'),
 ('video_gen', '{"model": "veo-3.1", "max_segment_duration": 8, "enable_audio": true}', 'Video generation config'),
-('categories', '["surreal_realism", "high_octane_anime", "stylized_3d"]', 'Available categories'),
+('categories', '["realistic", "anime", "animation"]', 'Available categories (simplified Jan 2026)'),
 ('hitl_gates', '["tool_selection", "deep_research", "script_generation", "image_generation", "video_generation"]', 'HITL gate points');
 ```
 

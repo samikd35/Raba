@@ -24,16 +24,33 @@ TOOL_ENHANCEMENT_SYSTEM_PROMPT = """You are a TECHNICAL DIRECTOR for RABA, a sys
 
 Your role is NOT to be a creative writer. You are a CINEMATOGRAPHIC ENGINEER generating TECHNICAL BLUEPRINTS, not creative descriptions.
 
-## RABA Visual Categories
+## RABA Visual Categories (Simplified)
 
-1. **surreal_realism**: Photorealistic visuals with impossible/surreal elements. Best for physics, science, nature visualization.
-2. **high_octane_anime**: Sakuga-style anime with dynamic action. Best for debates, philosophy, history, dramatic narratives.
-3. **stylized_3d**: Stylized 3D graphics and miniatures. Best for data visualization, statistics, comparisons.
+Categories are HIGH-LEVEL style guides. Each TOOL defines its own specific visual approach within its category.
+
+1. **realistic**: Live-action, photorealistic, documentary styles. Includes surreal/impossible physics visuals with realistic grounding.
+   - Guidance: Use camera techniques appropriate to subject matter
+   - Examples: Science documentaries, nature visualization, photorealistic simulations
+   
+2. **anime**: 2D animated, anime-inspired styles (any energy level from calm to high-octane).
+   - Guidance: Match animation intensity to content needs
+   - Examples: Sakuga battles, slice-of-life, dramatic narratives, educational anime
+   
+3. **animation**: 3D animated, motion graphics, stylized visuals, miniatures.
+   - Guidance: Use style that serves the narrative
+   - Examples: Data dioramas, Pixar-style, motion graphics, abstract visualizations
+
+**CRITICAL: Tool-Level Customization**
+Categories are guides, NOT rigid rules. Each tool defines its own:
+- Camera/lens preferences (any lens can be used in any category)
+- Visual aesthetics
+- Motion intensity
+- Color palettes
 
 ## REQUIREMENTS
 
 1. **tool_id**: Unique slug (lowercase, underscores, 3-50 chars). Example: "quantum_flow_visualizer"
-2. **category**: Exactly one of: surreal_realism, high_octane_anime, stylized_3d
+2. **category**: Exactly one of: realistic, anime, animation (use new simplified names)
 3. **description**: 2-3 sentences explaining visual style and use cases
 4. **capabilities**: Set relevant boolean flags
 5. **parameters_schema**: JSON Schema with "tone" and "duration_seconds" properties (include enums with valid values)
@@ -43,6 +60,15 @@ Your role is NOT to be a creative writer. You are a CINEMATOGRAPHIC ENGINEER gen
 ### script_prompt_template
 **MINIMUM 150 WORDS - NO EXCEPTIONS - COUNT WORDS CAREFULLY**
 Must include: {topic}, {tone}, {duration}
+
+**CRITICAL: USER INSTRUCTION PLACEHOLDERS** - Script templates MUST include:
+- `{user_topic}` - The user's original topic (primary focus of the script)
+- `{audio_mode}` - Whether audio/dialogue is enabled ("with_audio" or "silent")
+- `{text_overlay_mode}` - Whether text overlays are allowed ("with_text" or "no_text")
+
+**CRITICAL: AUDIO/VISUAL MODE AWARENESS** - The script template MUST instruct:
+- When `{audio_mode}` is "silent": Generate VISUAL-ONLY storytelling, no dialogue, no voice-over cues
+- When `{text_overlay_mode}` is "no_text": Do NOT include any on-screen text, captions, or graphic overlays in visual directions
 
 **CRITICAL: MANDATORY KEYWORDS** - The template MUST contain these exact words (case-insensitive):
 - "HOOK" (or "hook")
@@ -78,6 +104,13 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 **MINIMUM 150 WORDS - NO EXCEPTIONS - COUNT WORDS CAREFULLY**
 Must include: {scene_description}, {style}
 
+**CRITICAL: USER INSTRUCTION PLACEHOLDERS** - Image templates MUST include:
+- `{user_topic}` - The user's original topic for context
+- `{text_overlay_mode}` - Whether text overlays are allowed ("with_text" or "no_text")
+
+**CRITICAL: TEXT OVERLAY AWARENESS** - The image template MUST instruct:
+- When `{text_overlay_mode}` is "no_text": Generate PURELY VISUAL content with NO text, labels, captions, watermarks, or any typographic elements. This is a HARD CONSTRAINT.
+
 **CRITICAL: MANDATORY KEYWORDS** - The template MUST contain these exact words (case-insensitive):
 - "lighting"
 - "color" 
@@ -87,16 +120,34 @@ Must include: {scene_description}, {style}
 **CRITICAL: Replace adjectives with technical parameters.** No "dramatic lighting" - use "Global Illumination with 45-degree Rembrandt angle". No "epic style" - use "Unreal Engine 5 rendering pipeline with cel-shaded 2D ink-wash overlays".
 
 MUST explicitly include ALL of the following TECHNICAL sections (use exact keywords):
-1. **Rendering Engine & Optics**: Define the virtual lens with SPECIFIC VALUES. Enforce CATEGORY OPTICS PRESETS:
-   - stylized_3d → Tilt-Shift miniature look (35mm/50mm), NEVER anamorphic
-   - surreal_realism → Wide-angle anamorphic (14–24mm)
-   - high_octane_anime → Dynamic long lens (85–200mm)
+1. **Rendering Engine & Optics**: Define the virtual lens with SPECIFIC VALUES appropriate for the tool's visual style.
+   - Choose lens based on tool's needs, NOT category. Examples:
+   - Tilt-Shift (35mm/50mm) for miniature/diorama effects
+   - Wide-angle anamorphic (14–24mm) for epic/immersive shots
+   - Dynamic long lens (85–200mm) for action/character focus
+   - Standard (35mm-50mm) for natural perspective
 2. **Lighting Section**: MUST use the word "lighting". Use technical terms: "Volumetric God-rays at 45-degree angle", "Global Illumination bounce", "Ray-traced reflections", "HDR contrast ratio".
 3. **Material Science**: Define textures using technical rendering terms: "Subsurface Scattering for skin", "Anisotropic Filtering for metallic surfaces", "PBR (Physically Based Rendering) workflow".
 4. **Color Section**: MUST use the word "color". Define color palette with technical values (e.g., "HDR color gamut: Deep crimson (#8B0000) against electric blue (#0066FF)"). Specify color grading method.
 5. **Composition Section**: MUST use the word "composition". Use mathematical terms: "Golden Spiral leading to focal point", "Rule of thirds with optical center at (x,y)", "Diagonal lines at 45-degree angle".
 6. **Resolution Section**: MUST use the word "resolution". "8K native resolution (7680x4320), high-dynamic-range (HDR) contrast, zero-noise diffusion, sharp-edged cel-shading (if anime) or ray-traced reflections (if realistic)".
 7. **Negative Constraints**: Use in-prompt constraints (Gemini image has no negativePrompt). Either include a NEGATIVE CONSTRAINTS section explicitly or preserve `{image_negative_constraint}` placeholder that will be appended in code. Prohibit text/watermarks/labels and artifacts.
+
+**NEW STORYBOARD PLACEHOLDERS (for multi-scene composition):**
+- `{scene_descriptions}` - All scene descriptions concatenated (selected key scenes)
+- `{scene_count}` - Total number of scenes
+- `{key_entities}` - Primary visual entities that must appear
+- `{transformation_flow}` - Entity transformation sequence (e.g., "A → B → C")
+- `{composition_layout}` - Recommended storyboard layout
+- `{character_name}` - Lead character name (if any)
+- `{character_reference}` - Character consistency instructions
+
+**CRITICAL: STORYBOARD COMPOSITION REQUIREMENT**
+The image template MUST instruct the model to generate a STORYBOARD-STYLE COMPOSITE showing:
+1. Multiple visual states/scenes in a single frame
+2. All key entities that appear throughout the video
+3. Transformation/progression flow between states
+4. Consistent character appearance across all panels (if character exists)
 
 **WORD COUNT ENFORCEMENT - CRITICAL**: 
 - The template itself must be AT LEAST 150 words - this is NON-NEGOTIABLE
@@ -115,6 +166,21 @@ Must include: {script}, {duration}
 Should also include SEGMENT-AWARE placeholders when possible:
 - `{segment_index}`, `{total_segments}`, `{segment_action}`, `{previous_segment_state}`
 - Audio Block placeholders: `{dialogue_cue}`, `{sfx_cue}`, `{ambient_cue}`, `{music_cue}` (optional)
+
+**CRITICAL: USER INSTRUCTION PLACEHOLDERS** - Templates MUST include these for runtime customization:
+- `{user_topic}` - The user's original topic (MUST appear prominently)
+- `{audio_instruction}` - Runtime audio on/off instruction (will be filled by system)
+- `{subtitle_instruction}` - Runtime subtitle on/off instruction (will be filled by system)
+
+**CRITICAL: USER REQUEST BLOCK** - Every video template MUST START with:
+```
+[USER REQUEST - MUST FOLLOW EXACTLY]
+Topic: {user_topic}
+{audio_instruction}
+{subtitle_instruction}
+Duration: {duration} seconds
+[END USER REQUEST]
+```
 
 **CRITICAL: MANDATORY KEYWORDS** - The template MUST contain these exact words (case-insensitive):
 - "camera"
@@ -184,13 +250,23 @@ TOOL_IMPROVEMENT_SYSTEM_PROMPT = """You are a TECHNICAL DIRECTOR improving video
 
 Your role is NOT to be a creative writer. You are a CINEMATOGRAPHIC ENGINEER generating TECHNICAL BLUEPRINTS, not creative descriptions.
 
+## RABA Visual Categories (Simplified)
+
+Categories are HIGH-LEVEL style guides. Each TOOL defines its own specific visual approach.
+
+1. **realistic**: Live-action, photorealistic, documentary styles
+2. **anime**: 2D animated, anime-inspired styles (any energy level)
+3. **animation**: 3D animated, motion graphics, stylized visuals
+
+**Tool-Level Customization**: Categories are guides, NOT rigid rules. Each tool defines its own camera/lens preferences, visual aesthetics, and motion intensity.
+
 Given an existing tool and user feedback, improve the tool following these guidelines:
 
 ## IMPROVEMENT PRINCIPLES
 1. Preserve technical specifications that already work well
 2. Address the user's specific suggestions with technical solutions
 3. Maintain valid prompt template placeholders
-4. Keep the same category unless explicitly asked to change
+4. Keep the same category unless explicitly asked to change (use new names: realistic, anime, animation)
 5. Convert any remaining "adjective fluff" into "cinematographic parameters"
 
 ## CRITICAL REQUIREMENTS - ALL TEMPLATES MUST BE TECHNICAL BLUEPRINTS
@@ -280,6 +356,13 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 5. **Pacing Section**: MUST use the word "pacing". Use technical terms: "Speed Ramping: start at 0.5x speed for hook, accelerate to 2x during action peaks", "Temporal sampling at 60fps with frame interpolation".
 6. **Effects Section**: MUST use the word "effects". Specify "Particle Physics: Fluid Dynamics layer for environmental elements", "Chromatic Aberration at edges (max 5%)", "High-bitrate finish to eliminate digital artifacts".
 7. **Audio Block**: MUST use the word "audio". Define a structured block with Dialogue, SFX (tied to a visual action; no explicit timestamps), Ambient, and optional Music. Include a no-subtitles guardrail when appropriate (e.g., "no subtitles, no text overlays").
+
+**CRITICAL: MULTI-LAYER AUDIO STRATEGY**
+Templates MUST instruct layered audio design:
+1. Dialogue Layer: Voice-over synced to visual action (event-anchored, not absolute timestamps)
+2. SFX Layer: Sound effects tied to visual EVENTS (e.g., "metallic clang ON collision")
+3. Ambient Layer: Continuous environmental soundscape
+4. Music Layer: Intensity mapped to visual pacing
 8. **Consistency Section**: MUST use the word "consistency". "Ensure 100% subject-persistence across frame transitions. No 'morphing' or 'sliding'—feet must have 'grounded weight' on the terrain. Maintain facial geometry consistency using seed inheritance."
 
 **WORD COUNT ENFORCEMENT - CRITICAL**: 
@@ -412,6 +495,36 @@ class ToolEnhancerService:
             return text
         return text + "\n\nNEGATIVE CONSTRAINTS: {image_negative_constraint}"
 
+    def _ensure_storyboard_placeholders(self, text: str) -> str:
+        """Ensure image template has storyboard composition awareness and placeholders."""
+        indicators = [
+            "{scene_descriptions}",
+            "{key_entities}",
+            "{composition_layout}",
+            "storyboard",
+            "composite",
+            "multiple scenes",
+            "all panels",
+        ]
+        if any(ind.lower() in text.lower() for ind in indicators):
+            return text
+        storyboard_block = (
+            "\n\n[STORYBOARD]\n"
+            "LAYOUT: {composition_layout}\n"
+            "SCENES: {scene_count}\n"
+            "ENTITIES: {key_entities}\n"
+            "FLOW: {transformation_flow}\n"
+            "SCENE BREAKDOWN:\n{scene_descriptions}\n"
+            "(Generate a composite storyboard image showing ALL listed scenes/entities.)\n"
+        )
+        return text + storyboard_block
+
+    def _ensure_character_reference_placeholder(self, text: str) -> str:
+        """Ensure template can integrate character consistency instructions."""
+        if "{character_reference}" in text:
+            return text
+        return text + "\n\n[CHARACTER CONSISTENCY]\n{character_reference}\n"
+
     def _repair_templates(self, resp: ToolEnhancementResponse, *, category: CategoryEnum) -> ToolEnhancementResponse:
         # Video template fixes
         if resp.video_prompt_template:
@@ -425,6 +538,8 @@ class ToolEnhancerService:
         if resp.image_prompt_template:
             im = resp.image_prompt_template
             im = self._enforce_optics_in_image(im, category)
+            im = self._ensure_storyboard_placeholders(im)
+            im = self._ensure_character_reference_placeholder(im)
             im = self._ensure_image_negative(im)
             resp.image_prompt_template = im
         return resp
@@ -486,6 +601,7 @@ Generate a complete tool configuration following the schema requirements."""
             response_model=ToolEnhancementResponse,
             model=GEMINI_3_FLASH,
             system_instruction=TOOL_ENHANCEMENT_SYSTEM_PROMPT,
+            video_id=None,
         )
         
         # Ensure tool_id is properly formatted
@@ -569,6 +685,7 @@ Generate an improved version of this tool. Keep the same tool_id."""
             response_model=ToolEnhancementResponse,
             model=GEMINI_3_FLASH,
             system_instruction=TOOL_IMPROVEMENT_SYSTEM_PROMPT,
+            video_id=None,
         )
         
         # Keep the original tool_id

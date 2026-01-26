@@ -48,18 +48,33 @@ export default function MonitoringPage() {
         queryKey: ['monitoring', days],
         queryFn: () => api.get<MonitoringSummary>(`/monitoring/summary?days=${days}`),
     })
+    
+    // Normalize backend response for UI compatibility
+    const totals = {
+        total_tokens: data?.totals?.total_tokens ?? (data as any)?.total_tokens ?? 0,
+        total_cost_usd: data?.totals?.total_cost_usd ?? (data as any)?.total_cost_usd ?? 0,
+        total_videos: data?.totals?.total_videos ?? 0,
+        completed_videos: data?.totals?.completed_videos ?? 0,
+        failed_videos: data?.totals?.failed_videos ?? 0,
+    }
+    const successFractionRaw = data?.metrics?.success_rate ?? (data as any)?.success_rate ?? 0
+    const successFraction = successFractionRaw > 1 ? successFractionRaw / 100 : successFractionRaw
+    const cacheFractionRaw = data?.metrics?.cache_hit_rate ?? (data as any)?.cache_hit_rate ?? 0
+    const cacheFraction = cacheFractionRaw > 1 ? cacheFractionRaw / 100 : cacheFractionRaw
+    const avgGenTime = data?.metrics?.avg_generation_time_seconds ?? 0
+    const avgCostPerVideo = data?.metrics?.avg_cost_per_video_usd ?? 0
 
-    // Transform for charts
-    // Transform for charts
-    const typeData = data?.by_generation_type ? Object.entries(data.by_generation_type).map(([key, val]) => ({
+    // Transform for charts (support legacy keys)
+    const byType = data?.by_generation_type ?? (data as any)?.by_type
+    const typeData = byType ? Object.entries(byType).map(([key, val]: any) => ({
         name: key.toUpperCase(),
-        cost: val.cost_usd
+        cost: Number(val.cost_usd || 0),
     })) : []
-
-    const modelData = data?.by_model ? Object.entries(data.by_model).map(([key, val]) => ({
+    const byModel = data?.by_model ?? (data as any)?.by_model
+    const modelData = byModel ? Object.entries(byModel).map(([key, val]: any) => ({
         name: key,
-        cost: val.cost_usd,
-        calls: val.calls
+        cost: Number(val.cost_usd || 0),
+        calls: Number(val.calls || val.count || 0),
     })) : []
 
     return (
@@ -93,10 +108,10 @@ export default function MonitoringPage() {
                     </CardHeader>
                     <CardContent>
                         {isLoading ? <Skeleton className="h-8 w-20" /> : (
-                            <div className="text-2xl font-bold">${(data?.totals?.total_cost_usd ?? 0).toFixed(2)}</div>
+                            <div className="text-2xl font-bold">${(totals.total_cost_usd ?? 0).toFixed(2)}</div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1">
-                            For {data?.totals?.total_videos ?? 0} videos
+                            For {totals.total_videos} videos
                         </p>
                     </CardContent>
                 </Card>
@@ -108,10 +123,10 @@ export default function MonitoringPage() {
                     </CardHeader>
                     <CardContent>
                         {isLoading ? <Skeleton className="h-8 w-20" /> : (
-                            <div className="text-2xl font-bold">{((data?.metrics?.success_rate ?? 0) * 100).toFixed(1)}%</div>
+                            <div className="text-2xl font-bold">{(successFraction * 100).toFixed(1)}%</div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1">
-                            {data?.totals?.completed_videos ?? 0} completed / {data?.totals?.failed_videos ?? 0} failed
+                            {totals.completed_videos} completed / {totals.failed_videos} failed
                         </p>
                     </CardContent>
                 </Card>
@@ -123,7 +138,7 @@ export default function MonitoringPage() {
                     </CardHeader>
                     <CardContent>
                         {isLoading ? <Skeleton className="h-8 w-20" /> : (
-                            <div className="text-2xl font-bold">${(data?.metrics?.avg_cost_per_video_usd ?? 0).toFixed(2)}</div>
+                            <div className="text-2xl font-bold">${avgCostPerVideo.toFixed(2)}</div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1">
                             Est. margins +25%
@@ -138,10 +153,10 @@ export default function MonitoringPage() {
                     </CardHeader>
                     <CardContent>
                         {isLoading ? <Skeleton className="h-8 w-20" /> : (
-                            <div className="text-2xl font-bold">{Math.round(data?.metrics?.avg_generation_time_seconds ?? 0)}s</div>
+                            <div className="text-2xl font-bold">{Math.round(avgGenTime)}s</div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1">
-                            ~{(Number(data?.metrics?.avg_generation_time_seconds || 0) / 60).toFixed(1)} mins
+                            ~{(Number(avgGenTime) / 60).toFixed(1)} mins
                         </p>
                     </CardContent>
                 </Card>

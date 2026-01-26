@@ -124,7 +124,7 @@ export default function ToolsPage() {
   const onOpenDetail = (id: string) => { setSelectedId(id) }
   const onCloseDetail = () => { setSelectedId(null); setEditState(null) }
 
-  // Initialize from query params (?tool=tool_id&category=surreal_realism)
+  // Initialize from query params (?tool=tool_id&category=realistic)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
@@ -254,9 +254,9 @@ export default function ToolsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All categories</SelectItem>
-              <SelectItem value="surreal_realism">Surreal Realism</SelectItem>
-              <SelectItem value="high_octane_anime">High Octane Anime</SelectItem>
-              <SelectItem value="stylized_3d">Stylized 3D</SelectItem>
+              <SelectItem value="realistic">Realistic</SelectItem>
+              <SelectItem value="anime">Anime</SelectItem>
+              <SelectItem value="animation">Animation</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -332,9 +332,9 @@ export default function ToolsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto_detect">Auto-detect</SelectItem>
-                    <SelectItem value="surreal_realism">Surreal Realism</SelectItem>
-                    <SelectItem value="high_octane_anime">High Octane Anime</SelectItem>
-                    <SelectItem value="stylized_3d">Stylized 3D</SelectItem>
+                    <SelectItem value="realistic">Realistic</SelectItem>
+                    <SelectItem value="anime">Anime</SelectItem>
+                    <SelectItem value="animation">Animation</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">Let AI detect or choose manually</p>

@@ -27,11 +27,62 @@ class WorkflowStatus(str, Enum):
 
 
 class CategoryEnum(str, Enum):
-    """Video category/style enum."""
+    """Video category/style enum - simplified parent categories.
+    
+    New simplified categories (recommended):
+    - realistic: Live-action, photorealistic, documentary styles
+    - anime: 2D animated, anime-inspired styles (any energy level)
+    - animation: 3D animated, motion graphics, stylized visuals
+    
+    Legacy categories (deprecated, mapped to new):
+    - surreal_realism → realistic
+    - high_octane_anime → anime
+    - stylized_3d → animation
+    """
     AUTO = "auto"
+    # New simplified categories
+    REALISTIC = "realistic"
+    ANIME = "anime"
+    ANIMATION = "animation"
+    # Legacy categories (deprecated but supported for backward compatibility)
     SURREAL_REALISM = "surreal_realism"
     HIGH_OCTANE_ANIME = "high_octane_anime"
     STYLIZED_3D = "stylized_3d"
+    
+    @classmethod
+    def normalize(cls, value: str) -> "CategoryEnum":
+        """Normalize legacy category values to new simplified categories.
+        
+        Args:
+            value: Category string (old or new)
+            
+        Returns:
+            Normalized CategoryEnum (new simplified category)
+        """
+        legacy_mapping = {
+            "surreal_realism": cls.REALISTIC,
+            "high_octane_anime": cls.ANIME,
+            "stylized_3d": cls.ANIMATION,
+        }
+        if value in legacy_mapping:
+            return legacy_mapping[value]
+        return cls(value)
+    
+    @property
+    def is_legacy(self) -> bool:
+        """Check if this is a legacy (deprecated) category."""
+        return self in (self.SURREAL_REALISM, self.HIGH_OCTANE_ANIME, self.STYLIZED_3D)
+    
+    @property
+    def normalized(self) -> "CategoryEnum":
+        """Get the normalized (new) category value."""
+        if self == self.SURREAL_REALISM:
+            return self.REALISTIC
+        elif self == self.HIGH_OCTANE_ANIME:
+            return self.ANIME
+        elif self == self.STYLIZED_3D:
+            return self.ANIMATION
+        return self
 
 
 class HITLModeEnum(str, Enum):
@@ -66,7 +117,7 @@ class WorkflowInput(BaseModel):
     topic: str = Field(
         ...,
         min_length=3,
-        max_length=500,
+        max_length=2000,
         description="Video topic/subject (required)",
         examples=["How black holes work", "The history of the Roman Empire"]
     )

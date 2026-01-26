@@ -14,6 +14,21 @@ import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { BorderBeam } from '@/components/ui/border-beam'
 
+const categoryDisplayNames: Record<string, string> = {
+    realistic: 'Realistic',
+    anime: 'Anime',
+    animation: 'Animation',
+    surreal_realism: 'Realistic',
+    high_octane_anime: 'Anime',
+    stylized_3d: 'Animation',
+    auto: 'Auto',
+}
+
+const formatCategory = (category: string | undefined): string => {
+    if (!category) return 'Auto'
+    return categoryDisplayNames[category] || category.replace('_', ' ')
+}
+
 // Helper function to extract image URLs from different data structures
 const getImageUrls = (generatedImages: any): string[] => {
     if (!generatedImages) return []
@@ -256,7 +271,7 @@ export default function WorkflowDetailPage() {
                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                             <span>{new Date(workflow.created_at).toLocaleDateString()}</span>
                             <span>•</span>
-                            <span className="capitalize">{workflow.category.replace('_', ' ')}</span>
+                            <span>{formatCategory(workflow.category)}</span>
                             <span>•</span>
                             <span>{workflow.resolution}</span>
                         </div>

@@ -307,6 +307,7 @@ class VeoService:
         try:
             generation_config = types.GenerateVideosConfig(
                 aspect_ratio=config.aspect_ratio.value,
+                number_of_videos=1,
             )
             logger.info(f"Extension config: aspect_ratio={config.aspect_ratio.value}")
         except Exception as e:
@@ -377,6 +378,10 @@ class VeoService:
                 code = None
 
             if code in (13, 14, 4, 8, 429) or "internal server issue" in lower or "temporarily unavailable" in lower or "resource_exhausted" in lower or "quota" in lower:
+                raise VideoGenerationTransientError(f"Video extension transient error: {error_msg}")
+
+            # Treat empty result as transient (observed occasional SDK/platform inconsistency)
+            if "no videos in operation result" in lower or "no result/response in completed operation" in lower:
                 raise VideoGenerationTransientError(f"Video extension transient error: {error_msg}")
 
             raise VideoGenerationFailedError(f"Video extension failed: {error_msg}")
@@ -693,11 +698,18 @@ class VeoService:
         if not result:
             raise VideoGenerationFailedError("No result/response in completed operation")
         
-        if not hasattr(result, 'generated_videos') or not result.generated_videos:
+        # Extract generated videos (support alternate shapes)
+        generated_videos = None
+        if hasattr(result, 'generated_videos') and result.generated_videos:
+            generated_videos = result.generated_videos
+        elif hasattr(result, 'videos') and getattr(result, 'videos'):
+            generated_videos = getattr(result, 'videos')
+
+        if not generated_videos:
             raise VideoGenerationFailedError("No videos in operation result")
         
         # Return the GeneratedVideo object (which has .video property for extension)
-        generated_video = result.generated_videos[0]
+        generated_video = generated_videos[0]
         logger.info(f"Generated video object type: {type(generated_video).__name__}")
         if hasattr(generated_video, 'video'):
             video_obj = generated_video.video

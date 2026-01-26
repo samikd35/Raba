@@ -86,6 +86,7 @@ class GlobalStyleAnchorAgent:
                 response_model=GlobalStyleAnchorOutput,
                 model=GEMINI_3_FLASH,
                 temperature=0.5,
+                video_id=state.get("workflow_id"),
             )
             anchors = resp.model_dump() if hasattr(resp, 'model_dump') else (resp if isinstance(resp, dict) else {})
             # Validate minimal keys; fallback to defaults for category

@@ -31,3 +31,24 @@
 - Ensure changes build cleanly and preserve existing functionality
 - Consider edge cases and invalid inputs
 - Verify state persistence in LangGraph workflows
+
+## Tool Creation/Enhancer Maintenance (CRITICAL)
+The tool creation and enhancement system (`Backend/app/services/tool_enhancer.py`) is the **source of truth** for prompt template generation.
+
+**When making prompt template changes, update:**
+1. `TOOL_ENHANCEMENT_SYSTEM_PROMPT` - Controls new tool creation
+2. `TOOL_IMPROVEMENT_SYSTEM_PROMPT` - Controls tool improvement/bulk updates
+3. `app/services/template_validation.py` - Template validation rules
+
+**Template types stored in tools table:**
+- `script_prompt_template` - Used by script_writer agent
+- `image_prompt_template` - Used by image_generator agent
+- `video_prompt_template` - Used by video_generator agent
+
+**After template changes:** Run bulk-improve on existing tools to regenerate their templates.
+
+## Database Schema Reference
+- Reference `Backend/Documentations/tables.sql` for current database schema
+- Update `tables.sql` when modifying table structures or constraints
+- Sync schema changes with `Guides/RABA_Architecture.md` Section 8 (Database Schema)
+- Key tables: `workflows`, `tools`, `media`, `config`

@@ -38,6 +38,7 @@ class VisualLogicValidatorAgent:
                 response_model=VisualValidationOutput,
                 model=GEMINI_3_FLASH,
                 temperature=0.2,
+                video_id=state.get("workflow_id"),
             )
             logger.info("Visual logic validation completed via Gemini")
         except Exception as e:
@@ -56,4 +57,3 @@ class VisualLogicValidatorAgent:
 async def visual_logic_validator_node(state: VideoGenerationState) -> dict[str, Any]:
     agent = VisualLogicValidatorAgent()
     return await agent.run(state)
-

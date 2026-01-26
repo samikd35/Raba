@@ -35,7 +35,6 @@ from app.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-
 HOOK_ARCHETYPE_MAP = {
     "educational": [HookArchetype.TEACHER, HookArchetype.FORTUNETELLER],
     "entertainment": [HookArchetype.STORYTELLER, HookArchetype.DISRUPTOR],
@@ -46,7 +45,7 @@ HOOK_ARCHETYPE_MAP = {
 
 def _build_system_instruction() -> str:
     """Build system instruction following prompting best practices.
-    
+
     Reference: prompting_Docs.md - Use XML tags, be precise and direct.
     """
     return """<role>
@@ -87,7 +86,7 @@ def _build_hook_prompt(
     anchor: dict | None = None,
 ) -> str:
     """Build prompt for hook generation.
-    
+
     Reference: prompting_Docs.md - Context first, then task at end.
     """
     anchor_block = ""
@@ -97,8 +96,8 @@ def _build_hook_prompt(
             f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
             f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
             f"- Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
-            f"- Lighting: {anchor.get('lighting','')}\n"
-            f"- Camera: {anchor.get('camera','')}\n"
+            f"- Lighting: {anchor.get('lighting', '')}\n"
+            f"- Camera: {anchor.get('camera', '')}\n"
         )
 
     return f"""<context>
@@ -172,14 +171,14 @@ def _build_scenes_prompt(
     anchor: dict | None = None,
 ) -> str:
     """Build prompt for scene generation.
-    
+
     Reference: prompting_Docs.md - Structured prompts with clear examples.
     """
     remaining_duration = duration_seconds - hook_duration - 1.5  # Reserve 1.5s for CTA
     avg_scene_duration = remaining_duration / scene_count
-    
+
     content_type = "fictional/creative" if is_fictional else "factual/educational"
-    
+
     anchor_block = ""
     if anchor:
         anchor_block = (
@@ -187,9 +186,9 @@ def _build_scenes_prompt(
             f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
             f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
             f"- Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
-            f"- Lighting: {anchor.get('lighting','')}\n"
-            f"- Camera: {anchor.get('camera','')}\n"
-            f"- Texture: {anchor.get('texture','')}\n"
+            f"- Lighting: {anchor.get('lighting', '')}\n"
+            f"- Camera: {anchor.get('camera', '')}\n"
+            f"- Texture: {anchor.get('texture', '')}\n"
         )
 
     return f"""<context>
@@ -272,15 +271,15 @@ def _build_full_script_prompt(
     anchor: dict | None = None,
 ) -> str:
     """Build prompt for complete script generation in one call.
-    
+
     Reference: prompting_Docs.md - Comprehensive prompt with all context.
     """
     archetypes = HOOK_ARCHETYPE_MAP.get(intent_type, [HookArchetype.TEACHER])
     recommended_archetype = archetypes[0].value
-    
+
     scene_count = max(2, math.ceil(duration_seconds / 4))
     content_type = "fictional/creative" if is_fictional else "factual/educational"
-    
+
     anchor_block = ""
     if anchor:
         anchor_block = (
@@ -288,9 +287,9 @@ def _build_full_script_prompt(
             f"- Palette: {', '.join(anchor.get('color_palette', [])[:6])}\n"
             f"- Materials: {', '.join(anchor.get('materials', [])[:6])}\n"
             f"- Motion: {', '.join(anchor.get('motion_language', [])[:6])}\n"
-            f"- Lighting: {anchor.get('lighting','')}\n"
-            f"- Camera: {anchor.get('camera','')}\n"
-            f"- Texture: {anchor.get('texture','')}\n"
+            f"- Lighting: {anchor.get('lighting', '')}\n"
+            f"- Camera: {anchor.get('camera', '')}\n"
+            f"- Texture: {anchor.get('texture', '')}\n"
         )
 
     return f"""<context>
@@ -311,8 +310,8 @@ def _build_full_script_prompt(
 <viral_structure>
 Timeline for {duration_seconds} second video:
 - 0:00-0:02: HOOK (strongest opening, stop the scroll)
-- 0:02-{duration_seconds-2}: SCENES with pattern interrupts every 3-5s
-- {duration_seconds-2}:00-{duration_seconds}:00: CTA (satisfying conclusion + call-to-action)
+- 0:02-{duration_seconds - 2}: SCENES with pattern interrupts every 3-5s
+- {duration_seconds - 2}:00-{duration_seconds}:00: CTA (satisfying conclusion + call-to-action)
 
 Pattern Interrupt Types (vary these):
 - scene_change: New location/subject
@@ -369,6 +368,26 @@ Pattern Interrupt Types (vary these):
 }}
 </example_output>
 
+<lead_character_guidelines>
+The lead_character field is ONLY for human or humanoid characters that need visual consistency.
+
+POPULATE lead_character when:
+✓ A specific person appears throughout (e.g., "Moses", "Einstein", "Detective Chen")
+✓ A humanoid robot/AI with consistent appearance (e.g., "ARIA-7", "Android X")
+✓ An animated human character (e.g., "The Narrator" if shown on screen)
+
+DO NOT populate lead_character when:
+✗ The video is about products (cars, phones, shoes)
+✗ The video shows object transformations or evolutions
+✗ The subject is abstract (time, innovation, design philosophy)
+✗ The "character" is a brand or company personified
+✗ Multiple different people appear without a consistent lead
+✗ The video is purely informational with no character
+
+When in doubt, leave lead_character as null. It's better to skip character reference
+generation than to generate irrelevant humanoid images for product videos.
+</lead_character_guidelines>
+
 <task>
 Generate a complete viral script for this {duration_seconds}-second YouTube Short.
 
@@ -397,56 +416,56 @@ def _extract_research_summary(research_data: dict[str, Any]) -> tuple[str, bool]
     """Extract summary from research data (factual, creative, or hybrid)."""
     strategy = research_data.get("strategy_used", "factual")
     is_fictional = research_data.get("is_fictional", False)
-    
+
     if strategy == "creative" or strategy == ResearchStrategy.CREATIVE.value:
         story_concept = research_data.get("story_concept", "")
         narrative = research_data.get("narrative_arc", {})
         hook = narrative.get("hook", "") if isinstance(narrative, dict) else ""
         characters = research_data.get("characters", [])
         char_names = [c.get("name", "") for c in characters[:3]] if characters else []
-        
+
         summary = f"""Story Concept: {story_concept}
 Opening Hook: {hook}
-Characters: {', '.join(char_names) if char_names else 'Various'}
-Tone: {research_data.get('tone', 'dramatic')}
-Visual Style: {', '.join(research_data.get('visual_inspiration', [])[:3])}"""
+Characters: {", ".join(char_names) if char_names else "Various"}
+Tone: {research_data.get("tone", "dramatic")}
+Visual Style: {", ".join(research_data.get("visual_inspiration", [])[:3])}"""
         return summary, True
-        
+
     elif strategy == "hybrid" or strategy == ResearchStrategy.HYBRID.value:
         factual = research_data.get("factual_base", {})
         creative = research_data.get("creative_extension", {})
-        
+
         findings = factual.get("research_findings", [])
         facts = []
         for f in findings[:3]:
             if isinstance(f, dict):
                 facts.extend(f.get("key_facts", [])[:2])
-        
+
         story = creative.get("story_concept", "")
-        
+
         summary = f"""Factual Base:
-{chr(10).join(['- ' + fact for fact in facts[:5]])}
+{chr(10).join(["- " + fact for fact in facts[:5]])}
 
 Creative Extension: {story}
-Blend Points: {', '.join(research_data.get('blend_points', [])[:3])}"""
+Blend Points: {", ".join(research_data.get("blend_points", [])[:3])}"""
         return summary, False
-        
+
     else:
         findings = research_data.get("research_findings", [])
         facts = []
         for f in findings:
             if isinstance(f, dict):
                 facts.extend(f.get("key_facts", [])[:3])
-        
+
         exec_summary = research_data.get("executive_summary", "")
         angles = research_data.get("interesting_angles", [])
-        
+
         summary = f"""Executive Summary: {exec_summary}
 
 Key Facts:
-{chr(10).join(['- ' + fact for fact in facts[:6]])}
+{chr(10).join(["- " + fact for fact in facts[:6]])}
 
-Interesting Angles: {', '.join(angles[:3]) if angles else 'Standard approach'}"""
+Interesting Angles: {", ".join(angles[:3]) if angles else "Standard approach"}"""
         return summary, False
 
 
@@ -458,7 +477,7 @@ def _calculate_scene_count(duration_seconds: int) -> int:
 def _calculate_viral_metrics(script: ScriptOutput) -> ViralMetrics:
     """Calculate viral metrics for the generated script."""
     metrics = ViralMetrics()
-    
+
     hook_duration = script.hook.duration_seconds
     if hook_duration <= 2.5:
         metrics.hook_strength = 0.85
@@ -466,51 +485,56 @@ def _calculate_viral_metrics(script: ScriptOutput) -> ViralMetrics:
         metrics.hook_strength = 0.75
     else:
         metrics.hook_strength = 0.60
-    
+
     if "?" in script.hook.script:
         metrics.hook_strength = min(1.0, metrics.hook_strength + 0.05)
-    
+
     interrupt_count = sum(1 for s in script.scenes if s.pattern_interrupt_type)
     expected_interrupts = len(script.scenes)
     metrics.pattern_interrupt_density = min(1.0, interrupt_count / max(1, expected_interrupts))
-    
+
     if len(script.scenes) >= 2:
         has_setup = any("setup" in s.mood.lower() or s.scene_number == 1 for s in script.scenes)
-        has_climax = any("climax" in s.mood.lower() or "intense" in s.mood.lower() for s in script.scenes)
+        has_climax = any(
+            "climax" in s.mood.lower() or "intense" in s.mood.lower() for s in script.scenes
+        )
         metrics.emotional_arc = 0.5 + (0.25 if has_setup else 0) + (0.25 if has_climax else 0)
     else:
         metrics.emotional_arc = 0.5
-    
+
     if script.call_to_action.script:
         metrics.call_to_action_clarity = 0.80
     else:
         metrics.call_to_action_clarity = 0.60
-    
+
     metrics.audience_fit = 0.75
     metrics.novelty_factor = 0.70
-    
+
     return metrics
 
 
 class ScriptWriterAgent:
     """
     Script Writer Agent for generating viral YouTube Shorts scripts.
-    
+
     Transforms research output into structured scripts with:
     - Viral hooks (first 1-2 seconds)
     - Scenes with visual directions
     - Pattern interrupts (every 3-5 seconds)
     - Call-to-action
-    
+
     Reference: PHASE2_4_SCRIPT_GENERATOR_PLAN.md
     """
-    
+
     def __init__(self):
         """Initialize Script Writer Agent."""
         self.gemini = get_gemini_service()
         self.prompt_builder = get_prompt_builder()
         logger.info("ScriptWriterAgent initialized")
-    
+
+    def _safe_dump(self, script: ScriptOutput) -> dict:
+        return script.model_dump()
+
     async def generate_script(
         self,
         topic: str,
@@ -525,7 +549,7 @@ class ScriptWriterAgent:
     ) -> ScriptOutput:
         """
         Generate a complete viral script.
-        
+
         Args:
             topic: Video topic
             duration_seconds: Target duration (8-25)
@@ -534,15 +558,15 @@ class ScriptWriterAgent:
             tone: Desired tone
             target_audience: Target audience
             tool_category: Visual style category
-            
+
         Returns:
             Complete ScriptOutput
         """
         logger.info(f"Generating script for: {topic[:50]}...")
         logger.info(f"Duration: {duration_seconds}s, Tool: {tool_category}")
-        
+
         start_time = time.time()
-        
+
         research_summary, is_fictional = _extract_research_summary(research_data)
 
         if prebuilt_prompt and prebuilt_prompt.strip():
@@ -559,9 +583,9 @@ class ScriptWriterAgent:
                 tool_category=tool_category,
                 is_fictional=is_fictional,
             )
-        
+
         system_instruction = _build_system_instruction()
-        
+
         try:
             script = await self.gemini.generate_structured_output(
                 prompt=prompt,
@@ -569,52 +593,53 @@ class ScriptWriterAgent:
                 model=GEMINI_3_FLASH,
                 system_instruction=system_instruction,
                 temperature=1.0,
+                video_id=state.get("workflow_id"),
             )
-            
+
             script.viral_metrics = _calculate_viral_metrics(script)
             script.viral_score = script.viral_metrics.calculate_viral_score()
             script.estimated_completion_rate = min(0.98, 0.4 + script.viral_score * 0.5)
             script.tool_category_applied = tool_category
-            
+
             elapsed = time.time() - start_time
             logger.info(f"Script generated in {elapsed:.2f}s")
             logger.info(f"Viral score: {script.viral_score:.2f}")
             logger.info(f"Scenes: {len(script.scenes)}")
-            
+
             return script
-            
+
         except Exception as e:
             logger.error(f"Script generation failed: {e}")
             raise
-    
+
     async def run(self, state: VideoGenerationState) -> dict[str, Any]:
         """
         Run script generation from workflow state.
-        
+
         Args:
             state: Current workflow state
-            
+
         Returns:
             State update dict with script output
         """
         topic = state.get("topic", "")
         duration_seconds = state.get("duration_seconds", 18)
-        research_data = state.get("research_data", {})
-        intent_metadata = state.get("intent_metadata", {})
-        selected_tool = state.get("selected_tool", {})
-        
+        research_data = state.get("research_data") or {}
+        intent_metadata = state.get("intent_metadata") or {}
+        selected_tool = state.get("selected_tool") or {}
+
         intent_type = intent_metadata.get("intent_type", "educational")
         if hasattr(intent_type, "value"):
             intent_type = intent_type.value
-            
+
         tone = intent_metadata.get("tone", "informative")
         if hasattr(tone, "value"):
             tone = tone.value
-            
+
         target_audience = intent_metadata.get("target_audience", "general")
         if hasattr(target_audience, "value"):
             target_audience = target_audience.value
-        
+
         tool_category = selected_tool.get("category", "surreal_realism")
         if hasattr(tool_category, "value"):
             tool_category = tool_category.value
@@ -645,6 +670,11 @@ class ScriptWriterAgent:
                     "global_camera": anchor.get("camera", ""),
                     "global_texture": anchor.get("texture", ""),
                 }
+                ok, errs = self.prompt_builder.runtime_validate(
+                    template, ["topic", "tone", "duration"], min_words=50
+                )
+                if not ok:
+                    logger.warning(f"Script template runtime validation failed: {errs}")
                 rr = self.prompt_builder.render(
                     template,
                     context,
@@ -680,9 +710,9 @@ class ScriptWriterAgent:
             tool_category=tool_category,
             prebuilt_prompt=prebuilt_prompt,
         )
-        
+
         return {
-            "script_output": script.model_dump(),
+            "script_output": self._safe_dump(script),
             "hook": script.hook.model_dump(),
             "scenes": [s.model_dump() for s in script.scenes],
             "call_to_action": script.call_to_action.model_dump(),
