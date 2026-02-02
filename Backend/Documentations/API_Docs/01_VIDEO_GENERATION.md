@@ -193,6 +193,20 @@ Get the current status and outputs of a workflow.
     "tool_name": "Cosmic Flow Visualizer",
     "confidence": 0.92
   },
+  "audio_output": {
+    "segments": [
+      {
+        "segment_id": 0,
+        "character_name": "Narrator",
+        "text_transcript": "...",
+        "audio_file_path": "https://...",
+        "duration_seconds": 4.2,
+        "voice_config_used": {"voice_name": "Kore"}
+      }
+    ],
+    "total_duration": 12.5,
+    "is_generated": true
+  },
   "research_output": {
     "facts": ["Black holes warp spacetime...", "..."],
     "sources": ["NASA", "ESA"]

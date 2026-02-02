@@ -286,9 +286,10 @@ class ToolRegistry:
         List tools with optional filters.
         
         Includes Redis caching with 1-hour TTL for default queries.
+        Supports both legacy and new simplified category names.
         
         Args:
-            category: Optional category filter
+            category: Optional category filter (supports both old and new names)
             is_active: Filter by active status
             limit: Page size
             offset: Page offset
@@ -296,7 +297,26 @@ class ToolRegistry:
         Returns:
             Paginated tool list
         """
-        # Build cache key
+        # Normalize category filter to support both old and new names
+        category_filters = []
+        if category:
+            from app.models.workflow import CategoryEnum
+            
+            # Map new simplified names to legacy names for backward compatibility
+            category_mapping = {
+                "realistic": ["realistic", "surreal_realism"],
+                "anime": ["anime", "high_octane_anime"],
+                "animation": ["animation", "stylized_3d"],
+                # Legacy names map to themselves
+                "surreal_realism": ["surreal_realism"],
+                "high_octane_anime": ["high_octane_anime"],
+                "stylized_3d": ["stylized_3d"],
+            }
+            
+            category_filters = category_mapping.get(category.lower(), [category])
+            self._logger.debug(f"Category filter '{category}' expanded to: {category_filters}")
+        
+        # Build cache key (use original category for cache key)
         cache_key = self._cache_key("list") if not category else self._cache_key("category", category)
         
         # Check cache (only for default queries)
@@ -309,8 +329,13 @@ class ToolRegistry:
         # Build query
         query = self.supabase.table(self.TABLE_NAME).select("*", count="exact")
         
-        if category:
-            query = query.eq("category", category)
+        if category_filters:
+            # Use OR logic to match any of the category variants
+            if len(category_filters) == 1:
+                query = query.eq("category", category_filters[0])
+            else:
+                # Build OR filter: category.in.(value1,value2,...)
+                query = query.in_("category", category_filters)
         
         if is_active is not None:
             query = query.eq("is_active", is_active)
@@ -335,6 +360,7 @@ class ToolRegistry:
             await self._cache_set(cache_key, result.model_dump(mode="json"))
         
         return result
+
     
     async def update(
         self,

@@ -94,6 +94,11 @@ from app.models.video import (
     VideoSegment,
     VideoSegmentType,
 )
+from app.models.audio import (
+    AudioManifest,
+    AudioSegment,
+    VoiceProfile,
+)
 from app.models.output import (
     GenerationTiming,
     ImageOutputSummary,
@@ -191,6 +196,9 @@ __all__ = [
     "WorkflowInput",
     "WorkflowOutput",
     "WorkflowStatus",
+    "AudioManifest",
+    "AudioSegment",
+    "VoiceProfile",
     "GeneratedVideo",
     "HITLVideoAction",
     "HITLVideoFeedback",

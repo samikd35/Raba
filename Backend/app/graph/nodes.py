@@ -7,6 +7,7 @@ import time
 import uuid
 
 from app.agents.intent_tool_selector import IntentToolSelectorAgent, DEFAULT_TOOLS
+from app.agents.voice_generator import get_voice_generator_agent
 from app.models.script import ScriptOutput
 from app.models.tool import ToolMetadata, ToolCapabilities
 from app.models.workflow import CategoryEnum
@@ -850,6 +851,60 @@ async def script_writer_node(state: VideoGenerationState) -> dict:
                 "script_writer_failed": utc_now_iso(),
                 "script_writer_duration_ms": str(elapsed_ms),
                 "script_writer_run_id": run_id,
+            },
+        }
+
+
+async def voice_generator_node(state: VideoGenerationState) -> dict:
+    """LangGraph node for Voice Generator."""
+    workflow_id = state.get("workflow_id", "unknown")
+
+    log_header(logger, "AGENT: Voice Generator")
+    log_agent_event(logger, "VoiceGenerator", "Starting", workflow_id)
+
+    if not state.get("enable_audio"):
+        logger.info("Audio disabled; skipping Voice Generator")
+        return {}
+
+    if state.get("audio_manifest"):
+        logger.info("[CONTINUE] Skipping Voice Generator (audio_manifest already in state)")
+        return {}
+
+    run_id = str(uuid.uuid4())
+    start_time = time.time()
+    try:
+        agent = get_voice_generator_agent()
+        result = await agent.run(state)
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        if isinstance(result, dict):
+            result["phase_timestamps"] = {
+                **state.get("phase_timestamps", {}),
+                "voice_generator_completed": utc_now_iso(),
+                "voice_generator_duration_ms": str(elapsed_ms),
+                "voice_generator_run_id": run_id,
+            }
+            result["pending_regeneration"] = None
+            result["regeneration_feedback"] = None
+
+        log_agent_event(logger, "VoiceGenerator", "Completed", workflow_id)
+        return result
+    except Exception as e:
+        log_error_msg(logger, f"Voice Generator failed: {e}")
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        return {
+            "error": f"Voice Generator failed: {str(e)}",
+            "error_details": build_error_details(
+                node="voice_generator",
+                phase="voice_generator",
+                exception=e,
+                run_id=run_id,
+            ),
+            "phase_timestamps": {
+                **state.get("phase_timestamps", {}),
+                "voice_generator_failed": utc_now_iso(),
+                "voice_generator_duration_ms": str(elapsed_ms),
+                "voice_generator_run_id": run_id,
             },
         }
 

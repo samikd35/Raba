@@ -4,11 +4,18 @@ Generates a character reference sheet if the script identifies a lead character.
 Includes semantic validation to prevent generating sheets for non-character content.
 """
 
+import asyncio
 from typing import Any
 
 from app.graph.state import VideoGenerationState
 from app.models.overlay import CharacterReferenceImage, CharacterReferenceSheet
-from app.models.image import ImageGenerationConfig, ImageModel, ImageAspectRatio, ImageResolution, StyleReference
+from app.models.image import (
+    ImageGenerationConfig,
+    ImageModel,
+    ImageAspectRatio,
+    ImageResolution,
+    StyleReference,
+)
 from app.services.nano_banana import get_nano_banana_service
 from app.services.gemini import get_gemini_service
 from app.services.supabase import get_supabase_client
@@ -23,6 +30,7 @@ from pydantic import BaseModel, Field
 
 class CharacterValidationResult(BaseModel):
     """Result of semantic character validation."""
+
     is_valid_character: bool = Field(
         description="Whether this is a valid human/humanoid character for reference sheet generation"
     )
@@ -30,8 +38,7 @@ class CharacterValidationResult(BaseModel):
         description="Type: 'human', 'humanoid', 'animal', 'object', 'abstract', 'product', 'none'"
     )
     confidence: float = Field(
-        ge=0.0, le=1.0,
-        description="Confidence score for the validation decision"
+        ge=0.0, le=1.0, description="Confidence score for the validation decision"
     )
     reasoning: str = Field(
         description="Brief explanation of why this is or isn't a valid character"
@@ -105,11 +112,21 @@ class CharacterReferenceGeneratorAgent:
             return {}
 
         # Semantic validation to ensure this is a real character, not a product/abstract
-        validation_result = await self._validate_character_with_context(
-            state=state,
-            lead_character=name,
-            lead_character_description=desc,
-        )
+        try:
+            validation_result = await asyncio.wait_for(
+                self._validate_character_with_context(
+                    state=state,
+                    lead_character=name,
+                    lead_character_description=desc,
+                ),
+                timeout=25,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Character validation timed out; skipping reference generation")
+            return {
+                "character_reference_skipped": True,
+                "skip_reason": "validation_timeout",
+            }
 
         if not validation_result.is_valid_character:
             logger.warning(
@@ -122,7 +139,9 @@ class CharacterReferenceGeneratorAgent:
                 "skip_reason": validation_result.reasoning,
             }
 
-        category = (state.get("selected_tool") or {}).get("category") or state.get("category", "surreal_realism")
+        category = (state.get("selected_tool") or {}).get("category") or state.get(
+            "category", "surreal_realism"
+        )
         aspect_ratio = state.get("aspect_ratio", "9:16")
         resolution = state.get("resolution", "1080p")
 
@@ -133,40 +152,57 @@ class CharacterReferenceGeneratorAgent:
             "Focus on fidelity and repeatable details."
         )
         view_prompts = [
-            ("front", base + " Full front view, T-pose or relaxed neutral arms.")
-            ,("side", base + " Side profile view, consistent lighting with front view.")
-            ,("back", base + " Back view, ensure hair/clothing/back details visible.")
-            ,("face", base + " Close-up face, straight-on, neutral expression.")
+            ("front", base + " Full front view, T-pose or relaxed neutral arms."),
+            ("side", base + " Side profile view, consistent lighting with front view."),
+            ("back", base + " Back view, ensure hair/clothing/back details visible."),
+            ("face", base + " Close-up face, straight-on, neutral expression."),
         ]
 
         cfg = ImageGenerationConfig(
             model=ImageModel.NANO_BANANA_PRO,
-            aspect_ratio=ImageAspectRatio.PORTRAIT_9_16 if aspect_ratio == "9:16" else ImageAspectRatio.LANDSCAPE_16_9,
+            aspect_ratio=ImageAspectRatio.PORTRAIT_9_16
+            if aspect_ratio == "9:16"
+            else ImageAspectRatio.LANDSCAPE_16_9,
             resolution=ImageResolution.RES_2K if resolution == "1080p" else ImageResolution.RES_1K,
             style_keywords=[],
             maintain_consistency=True,
             max_retries=3,
         )
 
-        refs: list[CharacterReferenceImage] = []
-        for view, prompt in view_prompts:
+        async def _generate_view(view: str, prompt: str) -> CharacterReferenceImage | None:
             try:
-                img_bytes, _text, _retry = await self.nano.generate_image_with_retry(
-                    prompt=prompt,
-                    config=cfg,
-                    style_reference=StyleReference(style_description=f"Character sheet for {name}")
+                result = await asyncio.wait_for(
+                    self.nano.generate_image_with_retry(
+                        prompt=prompt,
+                        config=cfg,
+                        style_reference=StyleReference(
+                            style_description=f"Character sheet for {name}"
+                        ),
+                    ),
+                    timeout=75,
                 )
-                # Upload to storage
+                img_bytes = result[0]
                 import time
+
                 bucket = "media"
                 path = f"character_references/{workflow_id}/{view}_{int(time.time())}.png"
                 full_path = f"generated_images/{path}"
-                self.supabase.storage.from_(bucket).upload(path=full_path, file=img_bytes, file_options={"content-type": "image/png"})
+                self.supabase.storage.from_(bucket).upload(
+                    path=full_path, file=img_bytes, file_options={"content-type": "image/png"}
+                )
                 url = self.supabase.storage.from_(bucket).get_public_url(full_path)
-                refs.append(CharacterReferenceImage(view=view, url=url))
                 logger.info(f"Character reference view generated: {view}")
+                return CharacterReferenceImage(view=view, url=url)
+            except asyncio.TimeoutError:
+                logger.warning(f"Character reference view timed out: {view}")
+                return None
             except Exception as e:
                 logger.warning(f"Failed to generate character reference view {view}: {e}")
+                return None
+
+        tasks = [_generate_view(view, prompt) for view, prompt in view_prompts]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+        refs = [result for result in results if result]
 
         sheet = CharacterReferenceSheet(
             character_name=name,
@@ -178,10 +214,10 @@ class CharacterReferenceGeneratorAgent:
             },
         )
         logger.info(f"Character reference sheet created for {name} with {len(refs)} views")
-        
+
         # Persist character reference images to database
         await self._persist_to_database(workflow_id, refs, name)
-        
+
         return {
             "character_reference_sheet": sheet.model_dump(),
             "character_validation": validation_result.model_dump(),
@@ -198,7 +234,9 @@ class CharacterReferenceGeneratorAgent:
             # Extract context
             topic = state.get("topic", "") or state.get("user_prompt", "") or ""
             script = state.get("script_output", {}) or {}
-            category = (state.get("selected_tool") or {}).get("category") or state.get("category", "")
+            category = (state.get("selected_tool") or {}).get("category") or state.get(
+                "category", ""
+            )
 
             # Summarize script
             script_summary = self._build_script_summary(script)
@@ -234,15 +272,13 @@ class CharacterReferenceGeneratorAgent:
         try:
             hook = script.get("hook", {}) or {}
             if hook:
-                parts.append(
-                    f"Hook: {hook.get('script', '')} - {hook.get('visual_direction', '')}"
-                )
+                parts.append(f"Hook: {hook.get('script', '')} - {hook.get('visual_direction', '')}")
 
             scenes = script.get("scenes", []) or []
             for i, scene in enumerate(scenes[:4]):
                 desc = scene.get("description", "") or ""
                 dialogue = scene.get("dialogue", "") or ""
-                o = f"Scene {i+1}: {desc}"
+                o = f"Scene {i + 1}: {desc}"
                 if dialogue:
                     o += f" | Dialogue: {dialogue}"
                 parts.append(o)
@@ -254,7 +290,7 @@ class CharacterReferenceGeneratorAgent:
             # If script is malformed, just return empty summary
             pass
         return "\n".join([p for p in parts if p])
-    
+
     async def _persist_to_database(
         self,
         workflow_id: str,
@@ -265,11 +301,11 @@ class CharacterReferenceGeneratorAgent:
         try:
             from app.utils.helpers import utc_now_iso
             import os
-            
+
             for ref in reference_images:
                 if not ref.url:
                     continue
-                
+
                 # Extract storage path from URL
                 # URL format: https://...supabase.co/storage/v1/object/public/media/generated_images/...
                 storage_path = None
@@ -280,7 +316,7 @@ class CharacterReferenceGeneratorAgent:
                     parts = ref.url.split("/generated_images/")
                     if len(parts) > 1:
                         storage_path = f"generated_images/{parts[1]}"
-                
+
                 # Get file size from storage if possible
                 file_size_bytes = None
                 try:
@@ -289,31 +325,34 @@ class CharacterReferenceGeneratorAgent:
                         # Try to get file info from storage
                         file_info = self.supabase.storage.from_(bucket).list(
                             path=os.path.dirname(storage_path),
-                            search=os.path.basename(storage_path)
                         )
                         # Note: Supabase storage list doesn't return size directly
                         # We'll leave it as None for now
                 except Exception:
                     pass
-                
-                self.supabase.table("media").insert({
-                    "workflow_id": workflow_id,
-                    "media_type": "image",  # Allowed: image, video, audio
-                    "source": "generated",  # Allowed: user_upload, research, generated
-                    "storage_url": ref.url,
-                    "storage_path": storage_path,
-                    "mime_type": "image/png",
-                    "metadata": {
-                        "character_name": character_name,
-                        "view": ref.view,
-                        "type": "character_reference",
-                    },
-                    "file_size_bytes": file_size_bytes,
-                    "created_at": utc_now_iso(),
-                }).execute()
-            
-            logger.info(f"Persisted {len(reference_images)} character reference images to database for workflow {workflow_id}")
-            
+
+                self.supabase.table("media").insert(
+                    {
+                        "workflow_id": workflow_id,
+                        "media_type": "image",  # Allowed: image, video, audio
+                        "source": "generated",  # Allowed: user_upload, research, generated
+                        "storage_url": ref.url,
+                        "storage_path": storage_path,
+                        "mime_type": "image/png",
+                        "metadata": {
+                            "character_name": character_name,
+                            "view": ref.view,
+                            "type": "character_reference",
+                        },
+                        "file_size_bytes": file_size_bytes,
+                        "created_at": utc_now_iso(),
+                    }
+                ).execute()
+
+            logger.info(
+                f"Persisted {len(reference_images)} character reference images to database for workflow {workflow_id}"
+            )
+
         except Exception as e:
             logger.error(f"Failed to persist character reference images to database: {e}")
 

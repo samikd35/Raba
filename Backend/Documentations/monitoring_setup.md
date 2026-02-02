@@ -1,7 +1,7 @@
 RABA Monitoring Setup
 
 Overview
-- RABA now records usage for text (Gemini), image (Nano Banana), video (Veo), and research steps.
+- RABA now records usage for text (Gemini), image (Nano Banana), video (Veo), audio (Gemini TTS), and research steps.
 - Metrics are stored in Supabase table `usage_metrics` and surfaced via `/api/v1/monitoring` endpoints used by the Frontend Monitoring page.
 
 Prerequisites
@@ -27,10 +27,11 @@ Frontend
 - The Monitoring page (`/monitoring`) reads from `/api/v1/monitoring/summary?days=N`.
 - It supports both legacy and new summary shapes; after migration, all KPIs and charts populate.
 
-What’s Tracked
+What's Tracked
 - Text: estimated input/output tokens, duration, model, success/failure.
 - Image: aggregated prompt token estimate, num images, duration, model.
 - Video: final video seconds (for cost), generation time, model, segments, resolution/aspect.
+- Audio: total audio seconds, generation time, model, voices used.
 - Research: cache hit/miss, duration, strategy.
 
 Troubleshooting

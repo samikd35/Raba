@@ -22,6 +22,12 @@ from app.services.gemini import (
     GeminiValidationError,
     get_gemini_service,
 )
+from app.services.gemini_tts import (
+    GeminiTTSAPIError,
+    GeminiTTSService,
+    GeminiTTSServiceError,
+    get_gemini_tts_service,
+)
 from app.services.google_search import (
     GoogleSearchError,
     GoogleSearchService,
@@ -79,6 +85,9 @@ __all__ = [
     "GeminiService",
     "GeminiServiceError",
     "GeminiValidationError",
+    "GeminiTTSAPIError",
+    "GeminiTTSService",
+    "GeminiTTSServiceError",
     "GoogleSearchError",
     "GoogleSearchService",
     "ImageDownloadError",
@@ -101,6 +110,7 @@ __all__ = [
     "get_creative_ideation_service",
     "get_deep_research_service",
     "get_gemini_service",
+    "get_gemini_tts_service",
     "get_google_search_service",
     "get_nano_banana_service",
     "get_veo_service",

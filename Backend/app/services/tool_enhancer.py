@@ -70,6 +70,10 @@ Must include: {topic}, {tone}, {duration}
 - When `{audio_mode}` is "silent": Generate VISUAL-ONLY storytelling, no dialogue, no voice-over cues
 - When `{text_overlay_mode}` is "no_text": Do NOT include any on-screen text, captions, or graphic overlays in visual directions
 
+**CRITICAL: PROMPT SANITIZATION RULES**
+- Visual scaffolding outputs ("Visual Action" and "Camera Metadata") MUST NOT contain bracketed metadata like `[music]`, `[SFX]`, `[caption]`, or `[... ]` of any kind.
+- If any audio/SFX guidance is needed, it belongs in VO or audio-specific fields only; keep visual directives clean of bracketed cues.
+
 **CRITICAL: MANDATORY KEYWORDS** - The template MUST contain these exact words (case-insensitive):
 - "HOOK" (or "hook")
 - "pattern" 
@@ -111,6 +115,39 @@ Must include: {scene_description}, {style}
 **CRITICAL: TEXT OVERLAY AWARENESS** - The image template MUST instruct:
 - When `{text_overlay_mode}` is "no_text": Generate PURELY VISUAL content with NO text, labels, captions, watermarks, or any typographic elements. This is a HARD CONSTRAINT.
 
+**CRITICAL: INGREDIENTS-FIRST COMPOSITION (Veo 3.1 Best Practice)**
+The system will generate THREE SEPARATE images (not one composite):
+1. SUBJECT Image: Dedicated character/host reference with multiple views
+2. ENVIRONMENT Image: Clean background with NO foreground elements
+3. OBJECT/CONCEPT Image: Technical diagram or key element in isolation
+
+The template MUST provide distinct instructions for each ingredient type using these NEW PLACEHOLDERS:
+- `{ingredient_type}` - Will be "subject", "environment", or "object"
+- `{ingredient_subject}` - Subject-specific instructions (character consistency)
+- `{ingredient_environment}` - Environment-specific instructions (background only)
+- `{ingredient_object}` - Object-specific instructions (scientific/technical diagram)
+
+**TEMPLATE STRUCTURE REQUIREMENT**:
+```
+[INGREDIENT: {ingredient_type}]
+
+{% if ingredient_type == "subject" %}
+Generate a character reference sheet...
+{ingredient_subject}
+{% elif ingredient_type == "environment" %}
+Generate a clean background...
+{ingredient_environment}
+{% elif ingredient_type == "object" %}
+Generate a technical diagram...
+{ingredient_object}
+{% endif %}
+```
+
+**CRITICAL: NO COMPOSITE STORYBOARDS**
+- Do NOT instruct "generate a storyboard showing all scenes"
+- Each image is a SINGLE, ISOLATED ingredient for Veo to composite
+- Veo 3.1 handles the composition - we provide clean building blocks
+
 **CRITICAL: MANDATORY KEYWORDS** - The template MUST contain these exact words (case-insensitive):
 - "lighting"
 - "color" 
@@ -131,7 +168,7 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 4. **Color Section**: MUST use the word "color". Define color palette with technical values (e.g., "HDR color gamut: Deep crimson (#8B0000) against electric blue (#0066FF)"). Specify color grading method.
 5. **Composition Section**: MUST use the word "composition". Use mathematical terms: "Golden Spiral leading to focal point", "Rule of thirds with optical center at (x,y)", "Diagonal lines at 45-degree angle".
 6. **Resolution Section**: MUST use the word "resolution". "8K native resolution (7680x4320), high-dynamic-range (HDR) contrast, zero-noise diffusion, sharp-edged cel-shading (if anime) or ray-traced reflections (if realistic)".
-7. **Negative Constraints**: Use in-prompt constraints (Gemini image has no negativePrompt). Either include a NEGATIVE CONSTRAINTS section explicitly or preserve `{image_negative_constraint}` placeholder that will be appended in code. Prohibit text/watermarks/labels and artifacts.
+7. **Negative Constraints**: Use in-prompt constraints (Gemini image has no negativePrompt). Either include a NEGATIVE CONSTRAINTS section explicitly or preserve `{image_negative_constraint}` placeholder that will be appended in code. Prohibit text/watermarks/labels and artifacts. MUST restate "no text overlays" when `{text_overlay_mode}` is "no_text".
 
 **NEW STORYBOARD PLACEHOLDERS (for multi-scene composition):**
 - `{scene_descriptions}` - All scene descriptions concatenated (selected key scenes)
@@ -293,6 +330,9 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 5. **Visual Metadata Requirement**: For every line of VO, include bracketed [VISUAL_CUE] with motion intensity rating (1-10 scale).
 6. **CTA Section**: MUST use the word "CTA" or "call-to-action". Final 2.5s must include a high-contrast 'Graphic Overlay' instruction with specific psychological nudge.
 
+**CRITICAL: PROMPT SANITIZATION RULES**
+- Ensure the template instructs that bracketed audio/SFX/subtitle cues like `[music]`, `[SFX]`, `[caption]` MUST NOT appear in Visual Action or Camera Metadata outputs. Any such cues belong only in VO or audio fields.
+
 **WORD COUNT ENFORCEMENT - CRITICAL**: 
 - The template itself must be AT LEAST 150 words - this is NON-NEGOTIABLE
 - Count words using a word counter - do NOT estimate
@@ -323,6 +363,10 @@ MUST explicitly include ALL of the following TECHNICAL sections (use exact keywo
 5. **Composition Section**: MUST use the word "composition". Use mathematical terms: "Golden Spiral leading to focal point", "Rule of thirds with optical center at (x,y)".
 6. **Resolution Section**: MUST use the word "resolution". "8K native resolution (7680x4320), HDR contrast, zero-noise diffusion, sharp-edged cel-shading or ray-traced reflections".
 7. **Negative Constraints**: Explicitly list prohibited artifacts (minimum 50 words): "Exclude: Photorealistic human skin textures if stylized, uncanny valley eyes, baked-in text, floating gibberish, low-poly jagged edges, z-fighting textures, clipping geometry, generic stock-photo lighting, chromatic aberration over 5%, over-saturated neon glow."
+
+**CRITICAL: INGREDIENTS/STORYBOARD COMPOSITION**
+- Reinforce Ingredients approach: Subject, Environment, Object/Concept must be accounted for. Either require `{ingredient_subject}`, `{ingredient_environment}`, `{ingredient_object}` placeholders OR instruct a composite STORYBOARD image showing multiple panels/states with all key entities and flow.
+- When `{text_overlay_mode}` is `no_text`, explicitly restate the prohibition of any on-image text in both the composition instructions and the Negative Constraints.
 
 **WORD COUNT ENFORCEMENT - CRITICAL**: 
 - The template itself must be AT LEAST 150 words - this is NON-NEGOTIABLE
@@ -495,29 +539,33 @@ class ToolEnhancerService:
             return text
         return text + "\n\nNEGATIVE CONSTRAINTS: {image_negative_constraint}"
 
-    def _ensure_storyboard_placeholders(self, text: str) -> str:
-        """Ensure image template has storyboard composition awareness and placeholders."""
-        indicators = [
-            "{scene_descriptions}",
-            "{key_entities}",
-            "{composition_layout}",
-            "storyboard",
-            "composite",
-            "multiple scenes",
-            "all panels",
-        ]
-        if any(ind.lower() in text.lower() for ind in indicators):
-            return text
-        storyboard_block = (
-            "\n\n[STORYBOARD]\n"
-            "LAYOUT: {composition_layout}\n"
-            "SCENES: {scene_count}\n"
-            "ENTITIES: {key_entities}\n"
-            "FLOW: {transformation_flow}\n"
-            "SCENE BREAKDOWN:\n{scene_descriptions}\n"
-            "(Generate a composite storyboard image showing ALL listed scenes/entities.)\n"
+    def _ensure_ingredients_placeholders(self, text: str) -> str:
+        """Ensure image template has ingredients-first composition awareness."""
+        has_ingredients = (
+            "{ingredient_type}" in text
+            or "ingredient_subject" in text
+            or "ingredient_environment" in text
+            or "ingredient_object" in text
         )
-        return text + storyboard_block
+        if has_ingredients:
+            return text
+        ingredients_block = (
+            "\n\n[INGREDIENTS COMPOSITION]\n"
+            "This prompt will be called 3 times with {ingredient_type} set to: 'subject', 'environment', 'object'\n\n"
+            "IF {ingredient_type} == 'subject':\n"
+            "  Generate a CHARACTER REFERENCE SHEET showing the main host/character.\n"
+            "  Multiple views (front, 3/4, side), consistent appearance.\n"
+            "  Clean background for compositing.\n\n"
+            "IF {ingredient_type} == 'environment':\n"
+            "  Generate a CLEAN BACKGROUND SETTING.\n"
+            "  NO characters or foreground objects.\n"
+            "  High-quality, neutral lighting, professional finish.\n\n"
+            "IF {ingredient_type} == 'object':\n"
+            "  Generate a TECHNICAL DIAGRAM or KEY OBJECT.\n"
+            "  Scientific accuracy, clean labels (if text allowed), isolated subject.\n"
+            "  Follow 'Scientific Cinematographer' formula: [Subject] + [Composition] + [Style] + [Constraint]\n"
+        )
+        return text + ingredients_block
 
     def _ensure_character_reference_placeholder(self, text: str) -> str:
         """Ensure template can integrate character consistency instructions."""
@@ -538,7 +586,7 @@ class ToolEnhancerService:
         if resp.image_prompt_template:
             im = resp.image_prompt_template
             im = self._enforce_optics_in_image(im, category)
-            im = self._ensure_storyboard_placeholders(im)
+            im = self._ensure_ingredients_placeholders(im)
             im = self._ensure_character_reference_placeholder(im)
             im = self._ensure_image_negative(im)
             resp.image_prompt_template = im

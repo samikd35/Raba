@@ -22,6 +22,11 @@ class TemplateValidationService:
         for kw in must_have:
             if kw.lower() not in text:
                 errors.append(f"missing keyword: {kw}")
+        # Enforce visual scaffolding language for scene outputs
+        scaffolding = ["vo text", "visual action", "camera metadata"]
+        for kw in scaffolding:
+            if kw not in text:
+                errors.append(f"missing scene scaffold: {kw}")
         return (len(errors) == 0, errors)
 
     def validate_image(self, template: str) -> Tuple[bool, list[str]]:
@@ -36,6 +41,33 @@ class TemplateValidationService:
         if ("negative" not in tl and "no text" not in tl and "watermark" not in tl
                 and "{image_negative_constraint}" not in template):
             errors.append("missing negative constraints or {image_negative_constraint} placeholder")
+        # Require ingredients-first composition awareness (preferred) or storyboard fallback
+        ingredients_ok = any(
+            ind in template or ind in tl
+            for ind in [
+                "{ingredient_type}",
+                "ingredient_subject",
+                "ingredient_environment",
+                "ingredient_object",
+                "ingredients composition",
+                "[ingredients",
+            ]
+        )
+        storyboard_ok = any(
+            ind in template or ind in tl
+            for ind in [
+                "{scene_descriptions}",
+                "{scene_count}",
+                "{key_entities}",
+                "{transformation_flow}",
+                "{composition_layout}",
+                "storyboard",
+                "composite",
+                "multiple scenes",
+            ]
+        )
+        if not (ingredients_ok or storyboard_ok):
+            errors.append("missing ingredients placeholders or storyboard composition awareness")
         return (len(errors) == 0, errors)
 
     def validate_video(self, template: str) -> Tuple[bool, list[str]]:

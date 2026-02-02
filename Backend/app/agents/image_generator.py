@@ -36,12 +36,12 @@ from app.services.nano_banana import get_nano_banana_service
 from app.services.prompt_builder import get_prompt_builder
 from app.services.supabase import get_supabase_client
 from app.utils.logging import get_logger
+from app.utils.prompt_sanitizer import clean_visual_prompt, sanitize_scene
 
 logger = get_logger(__name__)
 
 # Limit generated images to align with Veo reference cap
 MIN_GENERATED_IMAGES = 1  # Always generate at least 1 image
-MAX_GENERATED_IMAGES = 1  # CRITIC: Master Style Frame only (single image)
 VEO_MAX_REFERENCE_IMAGES = 3  # Veo 3.1 accepts max 3 reference images
 
 ASPECT_RATIO_MAP = {
@@ -61,43 +61,37 @@ def calculate_images_to_generate(
     scene_count: int,
     user_has_reference: bool = False,
     research_image_count: int = 0,
+    enable_ingredients_mode: bool = True,
 ) -> int:
     """Calculate how many images to generate with Nano Banana.
 
-    IMPORTANT: User reference and research images are used as STYLE REFERENCES
-    during image generation, NOT as final reference images for Veo. We should
-    ALWAYS generate up to 3 images regardless of user/research images.
+    INGREDIENTS MODE (Veo 3.1 Best Practice):
+    Generate exactly 3 distinct "ingredient" images:
+    1. Subject - The main character/host/actor
+    2. Environment - The background/setting
+    3. Object/Concept - The key diagram/element
 
-    All generated images (up to 3) are then used as references for Veo video generation.
-    User reference and research images help maintain style consistency but don't
-    reduce the number of images we generate.
-
-    Logic:
-    - Always generate up to MAX_GENERATED_IMAGES (3) images
-    - Respect scene_count limit (don't generate more images than scenes)
-    - Generate at least MIN_GENERATED_IMAGES (1) image
-    - User reference and research images are used as style references, not counted
+    This prevents style poisoning and supports Veo 3.1 multi-reference compositing.
 
     Args:
-        scene_count: Number of scenes in the script
-        user_has_reference: Whether user provided a reference image (used for style, not counted)
-        research_image_count: Number of images from research (used for style, not counted)
+        scene_count: Number of scenes in the script (informational)
+        user_has_reference: Whether user provided a reference image
+        research_image_count: Number of images from research
+        enable_ingredients_mode: If True, always generate 3 ingredient images
 
     Returns:
-        Number of images to generate (1-3)
+        Number of images to generate (3 in ingredients mode, else 1 legacy)
     """
-    # CRITIC: Master Style Frame only – always generate 1 image
-    to_generate = 1
+    if enable_ingredients_mode:
+        to_generate = min(VEO_MAX_REFERENCE_IMAGES, 3)
+        logger.info(
+            f"Ingredients mode enabled: generating {to_generate} reference images (Subject, Environment, Object)"
+        )
+        return to_generate
 
-    # Ensure at least 1 image is generated
-    to_generate = max(MIN_GENERATED_IMAGES, to_generate)
-
-    logger.info(
-        f"Image count calculation: scenes={scene_count}, user_ref={user_has_reference} "
-        f"(style reference only), research={research_image_count} (style reference only), "
-        f"generating={to_generate} images"
-    )
-
+    # Legacy storyboard mode: fall back to single composite
+    to_generate = MIN_GENERATED_IMAGES
+    logger.info("Legacy storyboard mode: generating 1 composite image")
     return to_generate
 
 
@@ -131,7 +125,7 @@ def build_image_prompt(
     )
     parts.append(f"TOPIC CONTEXT: {topic}. Duration: {duration_seconds}s.\n\n")
     parts.append("VISUAL DESCRIPTION (representative opening moment):\n")
-    description = scene.get("description", "")
+    description = clean_visual_prompt(scene.get("description", ""))
     if description:
         parts.append(f"{description}\n\n")
     parts.append("STYLE REQUIREMENTS:\n")
@@ -187,7 +181,7 @@ def aggregate_scene_descriptions(scenes: list[dict], max_scenes: int = 6) -> str
     selected = select_key_scenes(scenes, max_scenes)
     parts: list[str] = []
     for i, scene in enumerate(selected):
-        desc = (scene.get("description", "") or "")[:200]
+        desc = clean_visual_prompt((scene.get("description", "") or "")[:200])
         keywords = scene.get("visual_keywords", []) or []
         scene_num = scene.get("scene_number", i + 1)
         kw = (" | Keywords: " + ", ".join(keywords[:4])) if keywords else ""
@@ -225,6 +219,28 @@ def extract_transformation_flow(scenes: list[dict]) -> str:
     first_kw = (scenes[0].get("visual_keywords", ["Start"]) or ["Start"])[0]
     last_kw = (scenes[-1].get("visual_keywords", ["End"]) or ["End"])[0]
     return f"{first_kw} → ... → {last_kw}"
+
+
+def extract_environment_from_scenes(scenes: list[dict]) -> str:
+    """Extract primary environment/setting from scenes."""
+    environments = set()
+    for scene in scenes or []:
+        desc = (scene.get("description", "") or "").lower()
+        for keyword in [
+            "laboratory",
+            "studio",
+            "office",
+            "forest",
+            "space",
+            "underwater",
+            "city",
+            "desert",
+        ]:
+            if keyword in desc:
+                environments.add(keyword)
+    if environments:
+        return ", ".join(list(environments)[:2])
+    return ""
 
 
 def determine_composition_layout(scene_count: int, has_character: bool) -> str:
@@ -323,6 +339,95 @@ def build_storyboard_prompt(
     return "".join(parts)
 
 
+def build_ingredient_prompt(
+    ingredient_type: str,
+    scenes: list[dict],
+    topic: str,
+    tool_category: str,
+    anchor: dict | None = None,
+    character_sheet: dict | None = None,
+    script_output: dict | None = None,
+) -> str:
+    """Build prompt for a specific ingredient type."""
+    parts: list[str] = []
+
+    if ingredient_type == "subject":
+        parts.append(
+            f"[INGREDIENT: SUBJECT - Character/Host Consistency]\n"
+            f"Generate a REFERENCE SHEET showing the main character/host for: {topic}\n\n"
+        )
+        if character_sheet:
+            _char_name, char_ref = build_character_reference_context(
+                character_sheet, script_output or {}
+            )
+            if char_ref:
+                parts.append(f"CHARACTER: {char_ref}\n\n")
+        elif script_output and script_output.get("lead_character"):
+            lead = script_output.get("lead_character")
+            desc = script_output.get("lead_character_description", "")
+            parts.append(f"CHARACTER: {lead}. {desc}\n\n")
+        else:
+            parts.append(
+                f"CHARACTER: A professional host/presenter suitable for {topic}. "
+                f"Clean, neutral appearance for maximum compositing flexibility.\n\n"
+            )
+        parts.append(
+            "REQUIREMENTS:\n"
+            "- Multiple views: Front, 3/4 profile, side view\n"
+            "- Consistent appearance, clothing, proportions across all views\n"
+            "- Clean background for easy compositing\n"
+            "- High detail on face and distinguishing features\n"
+        )
+    elif ingredient_type == "environment":
+        parts.append(
+            f"[INGREDIENT: ENVIRONMENT - Background/Setting]\n"
+            f"Generate a CLEAN, HIGH-QUALITY background environment for: {topic}\n\n"
+        )
+        key_settings = extract_environment_from_scenes(scenes)
+        if key_settings:
+            parts.append(f"SETTING: {key_settings}\n\n")
+        else:
+            parts.append(
+                f"SETTING: Professional studio environment suitable for {topic}.\n"
+                f"Neutral, clean, no distracting elements.\n\n"
+            )
+        parts.append(
+            "REQUIREMENTS:\n"
+            "- NO characters or objects (pure background)\n"
+            "- High-resolution, clean composition\n"
+            "- Neutral lighting that works with any foreground\n"
+            f"- Style consistent with {tool_category}\n"
+        )
+    else:
+        parts.append(
+            f"[INGREDIENT: OBJECT/CONCEPT - Key Visual Element]\n"
+            f"Generate a TECHNICAL DIAGRAM or KEY OBJECT for: {topic}\n\n"
+        )
+        key_entities = extract_key_entities(scenes, topic)
+        if key_entities:
+            parts.append(f"KEY ENTITIES: {key_entities}\n\n")
+        parts.append(
+            "SCIENTIFIC CINEMATOGRAPHER REQUIREMENTS:\n"
+            "- [Subject]: The specific object/concept (e.g., 'red blood cell', 'DNA strand')\n"
+            "- [Composition]: Extreme close-up OR technical cross-section\n"
+            "- [Style]: Scientific infographic, 4K resolution, sharp focus\n"
+            "- [Constraint]: Clean labels with sans-serif typography (if text_overlay_mode allows)\n"
+            "- [Constraint]: Clinical white or neutral background for maximum clarity\n"
+            "- NO artistic interpretation - FACTUAL ACCURACY REQUIRED\n"
+        )
+
+    if anchor:
+        parts.append("\nSTYLE ANCHOR:\n")
+        parts.append(f"- Palette: {', '.join(anchor.get('color_palette', [])[:4])}\n")
+        if anchor.get("lighting"):
+            parts.append(f"- Lighting: {anchor.get('lighting')}\n")
+
+    parts.append(f"\nSTYLE CATEGORY: {tool_category}\n")
+    parts.append("TECHNICAL: 8K resolution, sharp detail, professional quality.\n")
+
+    return "".join(parts)
+
+
 class ImageGeneratorAgent:
     """Agent for generating reference images with style consistency.
 
@@ -382,8 +487,13 @@ class ImageGeneratorAgent:
                 }
             )
 
-            # CRITIC: Always generate a single Master Style Frame
-            images_to_generate = 1
+            # Enable Ingredients mode for Veo 3.1 optimization
+            images_to_generate = calculate_images_to_generate(
+                scene_count=len(scenes),
+                user_has_reference=bool(user_reference_url),
+                research_image_count=len(research_images),
+                enable_ingredients_mode=True,
+            )
 
             config = ImageGenerationConfig(
                 model=ImageModel.NANO_BANANA_PRO,
@@ -395,6 +505,7 @@ class ImageGeneratorAgent:
 
             prompts = []
             selected_scenes = scenes[:1] if scenes else [{"description": topic, "scene_number": 1}]
+            selected_scenes = [sanitize_scene(s) for s in selected_scenes]
             anchor = state.get("global_style_anchor") or {}
             neg_default = (
                 "The image must be free of text, watermarks, labels, lettering, and UI overlays. "
@@ -407,7 +518,7 @@ class ImageGeneratorAgent:
                 if (isinstance(neg_from_tool, str) and neg_from_tool.strip())
                 else neg_default
             )
-            # Build a single storyboard prompt (replaces single-scene keyframe)
+            # Build prompts according to Ingredients strategy (or legacy fallback)
             template = (state.get("selected_tool") or {}).get("image_prompt_template")
             character_sheet = state.get("character_reference_sheet") or None
             storyboard_ctx = {
@@ -421,44 +532,145 @@ class ImageGeneratorAgent:
             }
             if template:
                 try:
-                    scene = selected_scenes[0]
-                    char_name, char_ref = build_character_reference_context(
-                        character_sheet, script_output
+                    if images_to_generate == 3:
+                        ingredient_types = ["subject", "environment", "object"]
+                        for idx, ing in enumerate(ingredient_types, start=1):
+                            scene = scenes[0] if scenes else {"description": topic, "scene_number": idx}
+                            char_name, char_ref = build_character_reference_context(
+                                character_sheet, script_output
+                            )
+                            ctx = {
+                                "scene_description": clean_visual_prompt(scene.get("description", "")),
+                                "style": tool_category,
+                                "scene_number": idx,
+                                "total_scenes": len(scenes),
+                                "camera_direction": scene.get("camera_direction", ""),
+                                "lighting": scene.get("lighting", ""),
+                                "mood": scene.get("mood", ""),
+                                "topic": topic,
+                                "duration_seconds": duration_seconds,
+                                # Ingredients placeholders
+                                "ingredient_type": ing,
+                                "ingredient_subject": "Character consistency, multiple views, clean background",
+                                "ingredient_environment": "Clean background only, no characters/objects",
+                                "ingredient_object": "Technical diagram/key object, scientific accuracy",
+                                # Storyboard placeholders retained for compatibility
+                                **storyboard_ctx,
+                                "character_name": char_name,
+                                "character_reference": char_ref,
+                                # Global style anchor context
+                                "global_color_palette": ", ".join(anchor.get("color_palette", [])[:6]),
+                                "global_materials": ", ".join(anchor.get("materials", [])[:6]),
+                                "global_motion_language": ", ".join(anchor.get("motion_language", [])[:6]),
+                                "global_lighting": anchor.get("lighting", ""),
+                                "global_camera": anchor.get("camera", ""),
+                                "global_texture": anchor.get("texture", ""),
+                                "image_negative_constraint": negative_block,
+                                "user_topic": state.get("user_topic", topic),
+                                "text_overlay_mode": "no_text" if not state.get("enable_subtitles", False) else "with_text",
+                            }
+                            ok, errs = self.prompt_builder.runtime_validate(
+                                template, ["scene_description", "style"], min_words=50
+                            )
+                            if not ok:
+                                logger.warning(
+                                    f"Image template runtime validation failed: {errs}"
+                                )
+                            rr = self.prompt_builder.render(
+                                template,
+                                ctx,
+                                required=["scene_description", "style"],
+                                min_words=50,
+                                fallback_prompt_builder=lambda ing=ing: build_ingredient_prompt(
+                                    ingredient_type=ing,
+                                    scenes=scenes,
+                                    topic=topic,
+                                    tool_category=tool_category,
+                                    anchor=anchor,
+                                    character_sheet=character_sheet,
+                                    script_output=script_output,
+                                ),
+                            )
+                            prompt_text = rr.prompt
+                            if "image_negative_constraint" not in (template or ""):
+                                prompt_text += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
+                            prompts.append(prompt_text)
+                    else:
+                        # Legacy storyboard single prompt
+                        scene = selected_scenes[0]
+                        char_name, char_ref = build_character_reference_context(
+                            character_sheet, script_output
+                        )
+                        context = {
+                            "scene_description": clean_visual_prompt(scene.get("description", "")),
+                            "style": tool_category,
+                            "scene_number": 1,
+                            "total_scenes": len(scenes),
+                            "camera_direction": scene.get("camera_direction", ""),
+                            "lighting": scene.get("lighting", ""),
+                            "mood": scene.get("mood", ""),
+                            "topic": topic,
+                            "duration_seconds": duration_seconds,
+                            # Storyboard placeholders
+                            **storyboard_ctx,
+                            "character_name": char_name,
+                            "character_reference": char_ref,
+                            # Global style anchor context
+                            "global_color_palette": ", ".join(anchor.get("color_palette", [])[:6]),
+                            "global_materials": ", ".join(anchor.get("materials", [])[:6]),
+                            "global_motion_language": ", ".join(anchor.get("motion_language", [])[:6]),
+                            "global_lighting": anchor.get("lighting", ""),
+                            "global_camera": anchor.get("camera", ""),
+                            "global_texture": anchor.get("texture", ""),
+                            "image_negative_constraint": negative_block,
+                        }
+                        ok, errs = self.prompt_builder.runtime_validate(
+                            template, ["scene_description", "style"], min_words=50
+                        )
+                        if not ok:
+                            logger.warning(
+                                f"Image template runtime validation failed: {errs}"
+                            )
+                        rr = self.prompt_builder.render(
+                            template,
+                            context,
+                            required=["scene_description", "style"],
+                            min_words=50,
+                            fallback_prompt_builder=lambda: build_storyboard_prompt(
+                                scenes=scenes,
+                                topic=topic,
+                                duration_seconds=duration_seconds,
+                                tool_category=tool_category,
+                                anchor=anchor,
+                                character_sheet=character_sheet,
+                                script_output=script_output,
+                            ),
+                        )
+                        prompt_text = rr.prompt
+                        if "image_negative_constraint" not in (template or ""):
+                            prompt_text += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
+                        prompts.append(prompt_text)
+                except Exception as e:
+                    logger.warning(
+                        f"Image template rendering failed: {e}; using fallback"
                     )
-                    context = {
-                        "scene_description": scene.get("description", ""),
-                        "style": tool_category,
-                        "scene_number": 1,
-                        "total_scenes": len(scenes),
-                        "camera_direction": scene.get("camera_direction", ""),
-                        "lighting": scene.get("lighting", ""),
-                        "mood": scene.get("mood", ""),
-                        "topic": topic,
-                        "duration_seconds": duration_seconds,
-                        # Storyboard placeholders
-                        **storyboard_ctx,
-                        "character_name": char_name,
-                        "character_reference": char_ref,
-                        # Global style anchor context
-                        "global_color_palette": ", ".join(anchor.get("color_palette", [])[:6]),
-                        "global_materials": ", ".join(anchor.get("materials", [])[:6]),
-                        "global_motion_language": ", ".join(anchor.get("motion_language", [])[:6]),
-                        "global_lighting": anchor.get("lighting", ""),
-                        "global_camera": anchor.get("camera", ""),
-                        "global_texture": anchor.get("texture", ""),
-                        "image_negative_constraint": negative_block,
-                    }
-                    ok, errs = self.prompt_builder.runtime_validate(
-                        template, ["scene_description", "style"], min_words=50
-                    )
-                    if not ok:
-                        logger.warning(f"Image template runtime validation failed: {errs}")
-                    rr = self.prompt_builder.render(
-                        template,
-                        context,
-                        required=["scene_description", "style"],
-                        min_words=50,
-                        fallback_prompt_builder=lambda: build_storyboard_prompt(
+                    if images_to_generate == 3:
+                        prompts = [
+                            build_ingredient_prompt(
+                                ingredient_type=ing,
+                                scenes=scenes,
+                                topic=topic,
+                                tool_category=tool_category,
+                                anchor=anchor,
+                                character_sheet=character_sheet,
+                                script_output=script_output,
+                            )
+                            + "\n\nNEGATIVE CONSTRAINTS: "
+                            + negative_block
+                            for ing in ["subject", "environment", "object"]
+                        ]
+                    else:
+                        prompt = build_storyboard_prompt(
                             scenes=scenes,
                             topic=topic,
                             duration_seconds=duration_seconds,
@@ -466,16 +678,26 @@ class ImageGeneratorAgent:
                             anchor=anchor,
                             character_sheet=character_sheet,
                             script_output=script_output,
-                        ),
-                    )
-                    prompt_text = rr.prompt
-                    if "image_negative_constraint" not in (template or ""):
-                        prompt_text += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
-                    prompts.append(prompt_text)
-                except Exception as e:
-                    logger.warning(
-                        f"Image template rendering failed: {e}; using storyboard fallback"
-                    )
+                        )
+                        prompt += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
+                        prompts.append(prompt)
+            else:
+                if images_to_generate == 3:
+                    prompts = [
+                        build_ingredient_prompt(
+                            ingredient_type=ing,
+                            scenes=scenes,
+                            topic=topic,
+                            tool_category=tool_category,
+                            anchor=anchor,
+                            character_sheet=character_sheet,
+                            script_output=script_output,
+                        )
+                        + "\n\nNEGATIVE CONSTRAINTS: "
+                        + negative_block
+                        for ing in ["subject", "environment", "object"]
+                    ]
+                else:
                     prompt = build_storyboard_prompt(
                         scenes=scenes,
                         topic=topic,
@@ -487,18 +709,6 @@ class ImageGeneratorAgent:
                     )
                     prompt += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
                     prompts.append(prompt)
-            else:
-                prompt = build_storyboard_prompt(
-                    scenes=scenes,
-                    topic=topic,
-                    duration_seconds=duration_seconds,
-                    tool_category=tool_category,
-                    anchor=anchor,
-                    character_sheet=character_sheet,
-                    script_output=script_output,
-                )
-                prompt += "\n\nNEGATIVE CONSTRAINTS: " + negative_block
-                prompts.append(prompt)
 
             style_reference = self._build_style_reference(
                 tool_category=tool_category,
@@ -562,12 +772,12 @@ class ImageGeneratorAgent:
             )
 
             generated_images = []
-            for i, (image_bytes, text_response, retry_count) in enumerate(results):
-                scene = selected_scenes[i]
-
-                storage_path = (
-                    f"generated_images/{workflow_id}/scene_{i + 1}_{int(time.time())}.png"
-                )
+            ingredient_roles = (
+                ["subject", "environment", "object"] if images_to_generate == 3 else ["master_style_frame"]
+            )
+            for i, (image_bytes, text_response, usage_metadata, retry_count) in enumerate(results):
+                role = ingredient_roles[i] if i < len(ingredient_roles) else f"scene_{i+1}"
+                storage_path = f"generated_images/{workflow_id}/{role}_{int(time.time())}.png"
                 image_url = await self._upload_to_storage(image_bytes, storage_path)
 
                 generated_image = GeneratedImage(
@@ -582,10 +792,10 @@ class ImageGeneratorAgent:
                     used_style_reference=(i > 0 or user_ref_bytes is not None),
                     style_reference_url=user_reference_url if i == 0 else None,
                     retry_count=retry_count,
-                    role="master_style_frame",
+                    role=role,
                 )
                 generated_images.append(generated_image)
-                logger.info(f"Image {i + 1} uploaded: {image_url}")
+                logger.info(f"Image {i + 1} uploaded: {image_url} as role={role}")
 
             all_images = self._combine_all_images(
                 user_reference_url=user_reference_url,
@@ -611,12 +821,28 @@ class ImageGeneratorAgent:
 
             from app.utils.helpers import utc_now_iso
 
+            # Prepare lightweight validation contract for downstream VLM checks
+            try:
+                required_entities = [
+                    e.strip() for e in (storyboard_ctx.get("key_entities") or "").split(",") if e.strip()
+                ]
+            except Exception:
+                required_entities = []
+            image_validation_contract = {
+                "required_entities": required_entities,
+                "constraints": [
+                    "No text overlays, labels, or watermarks",
+                    "Adhere to global style anchor (palette, materials, lighting, camera)",
+                ],
+            }
+
             state_update = {
                 "generated_images": [img.url for img in generated_images],
                 "all_images": [img.url for img in all_images],
                 "image_metadata": [img.model_dump() for img in generated_images],
                 "storyboard_context": {**storyboard_ctx},
-                "master_image_type": "storyboard",
+                "image_validation_contract": image_validation_contract,
+                "master_image_type": "ingredients" if images_to_generate == 3 else "storyboard",
                 "phase_timestamps": {
                     **state.get("phase_timestamps", {}),
                     "image_generator_completed": utc_now_iso(),
@@ -835,6 +1061,7 @@ class ImageGeneratorAgent:
                         "workflow_id": workflow_id,
                         "media_type": "image",  # Allowed: image, video, audio
                         "source": "generated",  # Allowed: user_upload, research, generated
+                        "role": getattr(img, "role", None) or "generated",
                         "storage_url": img.url,
                         "storage_path": img.storage_path,
                         "metadata": {
@@ -843,6 +1070,7 @@ class ImageGeneratorAgent:
                             "model_used": img.model_used.value,
                             "aspect_ratio": img.aspect_ratio.value,
                             "resolution": img.resolution.value,
+                            "role": getattr(img, "role", None) or "generated",
                         },
                     }
                 ).execute()

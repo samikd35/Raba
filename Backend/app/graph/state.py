@@ -73,6 +73,8 @@ class VideoGenerationState(TypedDict, total=False):
     character_reference_sheet: Optional[dict[str, Any]]
     visual_validation: Optional[dict[str, Any]]
     global_style_anchor: Optional[dict[str, Any]]
+    audio_manifest: Optional[dict[str, Any]]
+    audio_output: Optional[dict[str, Any]]
 
     status: Optional[str]
     final_output: Optional[dict[str, Any]]
@@ -161,6 +163,8 @@ def create_initial_state(
         "video_url": None,
         "video_metadata": None,
         "video_segments": None,
+        "audio_manifest": None,
+        "audio_output": None,
         "hitl_approved": {},
         "hitl_feedback": [],
         "current_hitl_gate": None,

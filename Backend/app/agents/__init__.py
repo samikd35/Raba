@@ -31,6 +31,10 @@ from app.agents.video_generator import (
     select_reference_images,
     plan_video_segments,
 )
+from app.agents.voice_generator import (
+    VoiceGeneratorAgent,
+    get_voice_generator_agent,
+)
 
 __all__ = [
     "DeepResearchAgent",
@@ -41,10 +45,12 @@ __all__ = [
     "ScriptWriterAgent",
     "ToolNotFoundError",
     "VideoGeneratorAgent",
+    "VoiceGeneratorAgent",
     "build_image_prompt",
     "build_video_prompt",
     "calculate_images_to_generate",
     "get_deep_research_agent",
+    "get_voice_generator_agent",
     "get_script_writer_agent",
     "image_generator_node",
     "plan_video_segments",

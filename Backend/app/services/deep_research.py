@@ -321,6 +321,34 @@ IMPORTANT REQUIREMENTS:
                 f"Research in progress... ({elapsed:.0f}s / {timeout_seconds}s)"
             )
             await asyncio.sleep(poll_interval)
+
+    async def quick_grounded_research(
+        self,
+        topic: str,
+        tool_category: str = "surreal_realism",
+        duration_seconds: int = 18,
+        target_audience: str = "general",
+    ) -> ResearchOutput:
+        """Fast fallback: generate grounded research text and parse it.
+
+        Uses Gemini grounded generation directly (no Interactions API) and
+        then parses the result into structured ResearchOutput. Designed for
+        timeout scenarios to avoid returning empty research.
+        """
+        prompt = self._build_research_prompt(
+            topic=topic,
+            tool_category=tool_category,
+            duration_seconds=duration_seconds,
+            target_audience=target_audience,
+        )
+        text, _citations = await self._gemini_service.generate_with_grounding(
+            prompt=prompt, model=GEMINI_3_PRO
+        )
+        output = await self.parse_research_output(text)
+        output.cache_hit = False
+        output.strategy_used = ResearchStrategy.FACTUAL
+        output.is_fictional = False
+        return output
     
     async def parse_research_output(
         self,

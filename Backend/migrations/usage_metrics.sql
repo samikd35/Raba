@@ -7,7 +7,7 @@
 CREATE TABLE IF NOT EXISTS usage_metrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id UUID REFERENCES workflows(id) ON DELETE SET NULL,
-    generation_type TEXT NOT NULL CHECK (generation_type IN ('text', 'image', 'video', 'research', 'embedding')),
+    generation_type TEXT NOT NULL CHECK (generation_type IN ('text', 'image', 'video', 'audio', 'research', 'embedding')),
     model_name TEXT NOT NULL,
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
@@ -46,6 +46,6 @@ CREATE INDEX IF NOT EXISTS idx_usage_metrics_type_date ON usage_metrics(generati
 --     USING (auth.role() = 'service_role');
 
 COMMENT ON TABLE usage_metrics IS 'Token usage and cost tracking for text, image, video, and research by workflow';
-COMMENT ON COLUMN usage_metrics.generation_type IS 'Type: text, image, video, research, embedding';
+COMMENT ON COLUMN usage_metrics.generation_type IS 'Type: text, image, video, audio, research, embedding';
 COMMENT ON COLUMN usage_metrics.cost_usd IS 'Calculated cost in USD based on model pricing';
 COMMENT ON COLUMN usage_metrics.cached_tokens IS 'Tokens served from cache (no cost)';

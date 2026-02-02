@@ -87,27 +87,27 @@ class VoiceProfile(BaseModel):
 ## 3. Implementation Plan
 
 ### Phase 1: Foundation (Models & Service)
-*   [ ] **Task 1.1:** Create `app/models/audio.py` with `AudioManifest` and `VoiceProfile`.
-*   [ ] **Task 1.2:** Update `app/models/video.py` to include `audio_manifest` in `VideoGenerationRequest`.
-*   [ ] **Task 1.3:** Create `app/services/gemini_tts.py` implementing `generate_speech` method with `SpeechConfig` and `VoiceConfig`.
+*   [x] **Task 1.1:** Create `app/models/audio.py` with `AudioManifest` and `VoiceProfile`.
+*   [x] **Task 1.2:** Update `app/models/video.py` to include `audio_manifest` in `VideoGenerationRequest`.
+*   [x] **Task 1.3:** Create `app/services/gemini_tts.py` implementing `generate_speech` method with `SpeechConfig` and `VoiceConfig`.
     *   *Verification:* Unit test generating a small "Hello World" wav file.
 
 ### Phase 2: Voice Agent Logic
-*   [ ] **Task 2.1:** Create `app/agents/voice_generator.py`.
+*   [x] **Task 2.1:** Create `app/agents/voice_generator.py`.
     *   Implement `run()` method.
     *   Implement parsing of `ScriptOutput` to extract dialogue per scene.
     *   Implement loop to generate audio for each segment.
     *   *Verification:* Run Agent with a mock script, verify `AudioManifest` output and valid .wav files.
 
 ### Phase 3: Video Agent Integration
-*   [ ] **Task 3.1:** Update `app/agents/video_generator.py`.
+*   [x] **Task 3.1:** Update `app/agents/video_generator.py`.
     *   Modify `plan_video_segments` to use `audio_manifest` timing if available.
     *   Update `build_video_prompt` to ensure `duration` matches audio manifest strictly.
     *   *Verification:* Unit test `plan_video_segments` with and without audio manifest.
 
 ### Phase 4: Workflow Orchestration
-*   [ ] **Task 4.1:** Update `app/graph/state.py` to include `audio_output`.
-*   [ ] **Task 4.2:** Update `app/graph/workflow.py`.
+*   [x] **Task 4.1:** Update `app/graph/state.py` to include `audio_output`.
+*   [x] **Task 4.2:** Update `app/graph/workflow.py`.
     *   Add conditional edge: If `enable_audio` -> `voice_agent` -> `video_agent`.
     *   Else -> `video_agent`.
 

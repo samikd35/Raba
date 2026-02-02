@@ -546,6 +546,7 @@ class ScriptWriterAgent:
         tool_category: str = "surreal_realism",
         *,
         prebuilt_prompt: Optional[str] = None,
+        workflow_id: Optional[str] = None,
     ) -> ScriptOutput:
         """
         Generate a complete viral script.
@@ -558,6 +559,7 @@ class ScriptWriterAgent:
             tone: Desired tone
             target_audience: Target audience
             tool_category: Visual style category
+            workflow_id: Workflow ID for tracking
 
         Returns:
             Complete ScriptOutput
@@ -593,7 +595,7 @@ class ScriptWriterAgent:
                 model=GEMINI_3_FLASH,
                 system_instruction=system_instruction,
                 temperature=1.0,
-                video_id=state.get("workflow_id"),
+                video_id=workflow_id,
             )
 
             script.viral_metrics = _calculate_viral_metrics(script)
@@ -709,6 +711,7 @@ class ScriptWriterAgent:
             target_audience=target_audience,
             tool_category=tool_category,
             prebuilt_prompt=prebuilt_prompt,
+            workflow_id=state.get("workflow_id"),
         )
 
         return {

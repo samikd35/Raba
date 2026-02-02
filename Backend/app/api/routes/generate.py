@@ -274,12 +274,18 @@ async def _create_workflow_internal(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tool not found: {tool_id}")
         if not tool.is_active:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tool is inactive: {tool_id}")
-        # If category is fixed (not auto), enforce match
-        if category != CategoryEnum.AUTO and tool.category != category.value:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Tool '{tool_id}' does not belong to category '{category.value}'",
-            )
+        # If category is fixed (not auto), enforce match (with normalization for legacy categories)
+        if category != CategoryEnum.AUTO:
+            # Normalize both categories for comparison
+            user_category_normalized = CategoryEnum(category.value).normalized.value
+            tool_category_normalized = CategoryEnum(tool.category).normalized.value
+            
+            if tool_category_normalized != user_category_normalized:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Tool '{tool_id}' (category: {tool.category}) does not belong to requested category '{category.value}'",
+                )
+
 
     workflow_data = {
         "id": workflow_id,

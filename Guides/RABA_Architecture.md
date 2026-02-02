@@ -1671,6 +1671,9 @@ CREATE TABLE workflows (
     
     -- Script Output (persisted per requirement #3)
     script_output JSONB,  -- {hook, scenes[], narration, punchline, viral_score}
+
+    -- Audio Output (audio-first pipeline)
+    audio_output JSONB,  -- {segments[], total_duration, is_generated}
     
     -- Image Generation Output (persisted per requirement #3)
     generated_images JSONB,  -- {image_urls[], metadata, generation_params}

@@ -1,7 +1,9 @@
+
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import type { ReactNode } from 'react'
 
 export interface WorkflowState {
     workflow_id: string
@@ -14,19 +16,35 @@ export interface WorkflowState {
 
     // Method results
     tool_selection?: {
+        selected_tool: any
+        intent_metadata: any
+        selection_reasoning: any
+        validated_params: any
         tool_name: string
         confidence: number
     }
     research_output?: {
+        total_sources: number
+        executive_summary: ReactNode
+        visual_elements: any
+        interesting_angles: any
         research_findings: any[]
         sources: any[]
     }
     script_output?: {
-        hook: { script: string }
+        total_duration_seconds: number | null
+        viral_metrics: any
+        call_to_action: any
+        hook: string | {
+            visual_direction?: ReactNode
+            duration_seconds?: number | null
+            script: string
+        }
         scenes: { description: string }[]
         viral_score: number
     }
     character_reference_sheet?: {
+        character_description: ReactNode
         character_name: string
         reference_images: Array<{ view: string; url: string }>
     }

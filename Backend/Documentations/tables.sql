@@ -13,6 +13,7 @@ CREATE TABLE public.media (
   workflow_id uuid NOT NULL,
   media_type character varying NOT NULL CHECK (media_type::text = ANY (ARRAY['image'::character varying, 'video'::character varying, 'audio'::character varying]::text[])),
   source character varying NOT NULL CHECK (source::text = ANY (ARRAY['user_upload'::character varying, 'research'::character varying, 'generated'::character varying]::text[])),
+  role character varying DEFAULT 'generated',
   storage_url text NOT NULL,
   storage_bucket character varying,
   storage_path text,
@@ -27,6 +28,7 @@ CREATE TABLE public.media (
   CONSTRAINT media_pkey PRIMARY KEY (id),
   CONSTRAINT media_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES public.workflows(id)
 );
+-- Possible role values: 'subject', 'environment', 'object', 'master_style_frame', 'user_reference'
 CREATE TABLE public.tools (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   tool_id character varying NOT NULL UNIQUE,
@@ -67,8 +69,11 @@ CREATE TABLE public.workflows (
   research_output jsonb,
   research_images jsonb,
   script_output jsonb,
+  audio_output jsonb,
   generated_images jsonb,
   video_output jsonb,
+  segment_contexts jsonb,
+  segment_context_status character varying,
   current_hitl_gate character varying,
   hitl_feedback jsonb DEFAULT '[]'::jsonb,
   error text,
@@ -80,4 +85,22 @@ CREATE TABLE public.workflows (
   user_selected_tool_id text,
   character_reference_sheet jsonb,
   CONSTRAINT workflows_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.usage_metrics (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workflow_id uuid REFERENCES public.workflows(id) ON DELETE SET NULL,
+  generation_type text NOT NULL CHECK (generation_type IN ('text', 'image', 'video', 'audio', 'research', 'embedding')),
+  model_name text NOT NULL,
+  input_tokens integer DEFAULT 0,
+  output_tokens integer DEFAULT 0,
+  total_tokens integer DEFAULT 0,
+  cached_tokens integer DEFAULT 0,
+  cost_usd numeric DEFAULT 0,
+  duration_seconds numeric DEFAULT 0,
+  success boolean DEFAULT true,
+  error_message text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT usage_metrics_pkey PRIMARY KEY (id)
 );

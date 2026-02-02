@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.graph.state import VideoGenerationState
+from app.models.audio import AudioManifest
 from app.models.video import (
     GeneratedVideo,
     HITLVideoFeedback,
@@ -91,7 +92,10 @@ def calculate_segments_needed(duration_seconds: int) -> int:
     return 1 + extensions_needed
 
 
-def plan_video_segments(duration_seconds: int) -> list[dict]:
+def plan_video_segments(
+    duration_seconds: int,
+    audio_manifest: Optional[AudioManifest] = None,
+) -> list[dict]:
     """Plan video segments for target duration.
 
     Args:
@@ -100,6 +104,27 @@ def plan_video_segments(duration_seconds: int) -> list[dict]:
     Returns:
         List of segment plans with timing info
     """
+    if audio_manifest and audio_manifest.segments:
+        segments = []
+        current_time = 0.0
+        for idx, audio_segment in enumerate(audio_manifest.segments):
+            duration = float(audio_segment.duration_seconds)
+            segment_type = "initial" if idx == 0 else "extension"
+            segments.append(
+                {
+                    "segment_number": idx,
+                    "type": segment_type,
+                    "start_time": current_time,
+                    "end_time": current_time + duration,
+                    "duration": duration,
+                }
+            )
+            current_time += duration
+        logger.info(
+            f"Planned {len(segments)} segments from audio manifest ({current_time:.2f}s total)"
+        )
+        return segments
+
     segments = []
     current_time = 0.0
 
@@ -139,6 +164,7 @@ def plan_video_segments(duration_seconds: int) -> list[dict]:
 
 def select_reference_images(
     generated_images: list[str],
+    image_metadata: list[dict] | None = None,
     max_count: int = MAX_REFERENCE_IMAGES,
 ) -> list[str]:
     """Select reference images from ONLY generated images (Nano Banana Pro).
@@ -176,21 +202,29 @@ def select_reference_images(
         logger.warning("No valid generated images after filtering failed uploads")
         return []
 
-    # Always use all images if we have max_count or fewer
-    if len(valid_images) <= max_count:
-        selected = valid_images[:max_count]
-        logger.info(f"Using all {len(selected)} generated images as references for Veo")
-    else:
-        # If more than max_count, select strategically: first, middle, last
-        selected = [valid_images[0]]
-        if max_count >= 2:
-            selected.append(valid_images[-1])
-        if max_count >= 3 and len(valid_images) > 2:
-            mid_idx = len(valid_images) // 2
-            selected.insert(1, valid_images[mid_idx])
-        logger.info(
-            f"Selected {len(selected)} images from {len(generated_images)} total (first, middle, last)"
-        )
+    selected: list[str] = []
+    # Prefer ingredients ordering if metadata with roles is provided
+    if image_metadata:
+        try:
+            role_order = ["subject", "environment", "object"]
+            role_to_url = {}
+            for md in image_metadata:
+                role = (md or {}).get("role")
+                url = (md or {}).get("url")
+                if role and url and role not in role_to_url:
+                    role_to_url[role] = url
+            for role in role_order:
+                if role in role_to_url and len(selected) < max_count:
+                    selected.append(role_to_url[role])
+        except Exception as e:
+            logger.warning(f"Ingredients-aware selection failed: {e}; falling back")
+    # Fill remaining slots from valid_images order
+    for url in valid_images:
+        if len(selected) >= max_count:
+            break
+        if url not in selected:
+            selected.append(url)
+    logger.info(f"Reference images for Veo: {len(selected)} images selected")
 
     logger.info(f"Reference images for Veo: {len(selected)} images selected")
     if len(selected) < len(generated_images) and len(generated_images) <= max_count:
@@ -210,6 +244,7 @@ def build_video_prompt(
     previous_segment_end: Optional[str] = None,
     anchor: Optional[dict] = None,
     segment_ctx: Optional[dict] = None,
+    audio_segment: Optional[dict] = None,
     enable_audio: bool = False,
     enable_subtitles: bool = False,
 ) -> str:
@@ -238,9 +273,28 @@ def build_video_prompt(
     if not enable_subtitles:
         parts.append("Text: NO TEXT OVERLAYS, no subtitles, no captions, no on-screen text\n")
     duration = segment_info.get("end_time", 8) - segment_info.get("start_time", 0)
-    parts.append(f"Duration: {duration:.0f} seconds\n")
+    parts.append(f"Duration: {duration:.2f} seconds\n")
     parts.append(f"Style: {tool_category}\n")
     parts.append("[END USER REQUEST]\n\n")
+
+    # Veo 3.1 prompt structure elements (subject, action, style, camera, composition)
+    parts.append("[VEO 3.1 GENERATION REQUIREMENTS]\n")
+    try:
+        parts.append(f"Subject: {extract_subject_from_script(script_output)}\n")
+    except Exception:
+        parts.append("Subject: main subject\n")
+    try:
+        parts.append(f"Action: {extract_action_from_segment(script_output, segment_info)}\n")
+    except Exception:
+        parts.append("Action: moving\n")
+    parts.append(f"Style: {tool_category}\n")
+    camera_position = (anchor.get("camera") if anchor else None) or "eye-level"
+    parts.append(f"Camera: {camera_position}\n")
+    composition = "medium shot" if not is_extension else "continuous from previous"
+    parts.append(f"Composition: {composition}\n")
+    if anchor and anchor.get("color_palette"):
+        parts.append(f"Ambiance: {', '.join(anchor.get('color_palette')[:3])} tones\n")
+    parts.append("[END VEO REQUIREMENTS]\n\n")
 
     if is_extension and previous_segment_end:
         parts.append(f"[CONTINUATION] Seamlessly continue from: {previous_segment_end}\n\n")
@@ -259,6 +313,10 @@ def build_video_prompt(
 
     start_time = segment_info.get("start_time", 0)
     end_time = segment_info.get("end_time", 8)
+
+    audio_dialogue = ""
+    if audio_segment:
+        audio_dialogue = audio_segment.get("text_transcript", "")
 
     if not is_extension and hook:
         hook_text = hook.get("text", "")
@@ -303,7 +361,9 @@ def build_video_prompt(
         parts.append(f"[SCENE {scene_num}]\n")
         if description:
             parts.append(f"Visual: {description}\n")
-        if dialogue:
+        if audio_dialogue:
+            parts.append(f'Dialogue: "{audio_dialogue}"\n')
+        elif dialogue:
             parts.append(f'Dialogue: "{dialogue}"\n')
         parts.append(f"Camera: {camera}\n")
         if mood:
@@ -340,7 +400,9 @@ def build_video_prompt(
             parts.append(f"Goal State: {segment_ctx.get('goal_state')}\n")
         parts.append("\n")
         parts.append("[AUDIO - EVENT ANCHORED]\n")
-        if dlg:
+        if audio_dialogue:
+            parts.append(f'Dialogue: "{audio_dialogue}" (spoken DURING: {visual_anchor})\n')
+        elif dlg:
             parts.append(f'Dialogue: "{dlg}" (spoken DURING: {visual_anchor})\n')
         if sfx:
             parts.append(f"SFX: {sfx} (triggered BY: {visual_anchor})\n")
@@ -383,6 +445,46 @@ def build_video_prompt(
     return "".join(parts)
 
 
+def extract_subject_from_script(script_output: dict) -> str:
+    """Extract the main subject for Veo prompt."""
+    try:
+        lead = script_output.get("lead_character")
+        if lead:
+            return str(lead)
+        scenes = script_output.get("scenes", [])
+        if scenes and isinstance(scenes[0].get("visual_keywords"), list) and scenes[0]["visual_keywords"]:
+            return str(scenes[0]["visual_keywords"][0])
+    except Exception:
+        pass
+    return "main subject"
+
+
+def extract_action_from_segment(script_output: dict, segment_info: dict) -> str:
+    """Extract primary action for this segment."""
+    try:
+        start = segment_info.get("start_time", 0)
+        end = segment_info.get("end_time", 8)
+        scenes = script_output.get("scenes", [])
+        relevant = [
+            s for s in scenes if s.get("start_time", 0) < end and s.get("end_time", 0) > start
+        ]
+        if relevant:
+            desc = (relevant[0].get("description", "") or "").lower()
+            for verb in [
+                "walking",
+                "running",
+                "explaining",
+                "demonstrating",
+                "showing",
+                "pointing",
+            ]:
+                if verb in desc:
+                    return verb
+    except Exception:
+        pass
+    return "moving"
+
+
 def build_extension_prompt(
     script_output: dict,
     tool_category: str,
@@ -390,6 +492,7 @@ def build_extension_prompt(
     previous_end_description: str,
     anchor: Optional[dict] = None,
     segment_ctx: Optional[dict] = None,
+    audio_segment: Optional[dict] = None,
     enable_audio: bool = False,
     enable_subtitles: bool = False,
 ) -> str:
@@ -413,6 +516,7 @@ def build_extension_prompt(
         previous_segment_end=previous_end_description,
         anchor=anchor,
         segment_ctx=segment_ctx,
+        audio_segment=audio_segment,
         enable_audio=enable_audio,
         enable_subtitles=enable_subtitles,
     )
@@ -460,6 +564,25 @@ class VideoGeneratorAgent:
             research_images = state.get("research_images") or []
             user_reference_url = state.get("user_reference_image_url", None)
 
+            audio_manifest = state.get("audio_manifest")
+            audio_manifest_model = None
+            if audio_manifest:
+                try:
+                    audio_manifest_model = AudioManifest.model_validate(audio_manifest)
+                    if audio_manifest_model.total_duration:
+                        audio_total = float(audio_manifest_model.total_duration)
+                        drift = abs(audio_total - float(duration_seconds))
+                        if drift <= 0.35:
+                            duration_seconds = int(round(audio_total))
+                        else:
+                            logger.warning(
+                                "Audio/video duration drift exceeds tolerance: requested=%.2fs, audio=%.2fs",
+                                float(duration_seconds),
+                                audio_total,
+                            )
+                except Exception:
+                    audio_manifest_model = None
+
             VideoGenerationRequest.model_validate(
                 {
                     "workflow_id": workflow_id,
@@ -474,6 +597,7 @@ class VideoGeneratorAgent:
                     "resolution": resolution,
                     "duration_seconds": duration_seconds,
                     "enable_audio": enable_audio,
+                    "audio_manifest": audio_manifest_model,
                 }
             )
 
@@ -505,6 +629,7 @@ class VideoGeneratorAgent:
             # Research images are used as reference for Image Generator, not here
             selected_images = select_reference_images(
                 generated_images=generated_images,
+                image_metadata=state.get("image_metadata") or None,
             )
 
             # Download reference images with MIME detection
@@ -518,7 +643,10 @@ class VideoGeneratorAgent:
 
             logger.info(f"Downloaded {len(reference_images)} reference images for Veo")
 
-            segment_plans = plan_video_segments(duration_seconds)
+            segment_plans = plan_video_segments(
+                duration_seconds,
+                audio_manifest=audio_manifest_model,
+            )
             # Compute per-segment context blocks (segment-aware prompting)
             segment_contexts = compute_segment_context_blocks(
                 script_output=script_output,
@@ -532,6 +660,10 @@ class VideoGeneratorAgent:
             )
 
             # Template-based prompt if available
+            audio_segments = []
+            if audio_manifest_model:
+                audio_segments = [seg.model_dump() for seg in audio_manifest_model.segments]
+
             initial_prompt = None
             try:
                 tpl = (state.get("selected_tool") or {}).get("video_prompt_template")
@@ -587,6 +719,7 @@ class VideoGeneratorAgent:
                             segment_info=segment_plans[0],
                             is_extension=False,
                             segment_ctx=segment_contexts[0] if segment_contexts else None,
+                            audio_segment=audio_segments[0] if audio_segments else None,
                             enable_audio=enable_audio,
                             enable_subtitles=state.get("enable_subtitles", False),
                         ),
@@ -610,6 +743,7 @@ class VideoGeneratorAgent:
                         is_extension=False,
                         anchor=state.get("global_style_anchor") or None,
                         segment_ctx=segment_contexts[0] if segment_contexts else None,
+                        audio_segment=audio_segments[0] if audio_segments else None,
                         enable_audio=enable_audio,
                         enable_subtitles=state.get("enable_subtitles", False),
                     )
@@ -625,6 +759,7 @@ class VideoGeneratorAgent:
                     segment_info=segment_plans[0],
                     is_extension=False,
                     segment_ctx=segment_contexts[0] if segment_contexts else None,
+                    audio_segment=audio_segments[0] if audio_segments else None,
                     enable_audio=enable_audio,
                     enable_subtitles=state.get("enable_subtitles", False),
                 )
@@ -742,6 +877,9 @@ class VideoGeneratorAgent:
                                 segment_ctx=segment_contexts[i]
                                 if i < len(segment_contexts)
                                 else None,
+                                audio_segment=audio_segments[i]
+                                if i < len(audio_segments)
+                                else None,
                                 enable_audio=enable_audio,
                                 enable_subtitles=state.get("enable_subtitles", False),
                             ),
@@ -804,6 +942,7 @@ class VideoGeneratorAgent:
                             previous_end_description=prev_end,
                             anchor=state.get("global_style_anchor") or None,
                             segment_ctx=segment_contexts[i] if i < len(segment_contexts) else None,
+                            audio_segment=audio_segments[i] if i < len(audio_segments) else None,
                             enable_audio=enable_audio,
                             enable_subtitles=state.get("enable_subtitles", False),
                         )
@@ -867,6 +1006,7 @@ class VideoGeneratorAgent:
                         previous_end_description=prev_end,
                         anchor=state.get("global_style_anchor") or None,
                         segment_ctx=segment_contexts[i] if i < len(segment_contexts) else None,
+                        audio_segment=audio_segments[i] if i < len(audio_segments) else None,
                         enable_audio=enable_audio,
                         enable_subtitles=state.get("enable_subtitles", False),
                     )
@@ -1013,6 +1153,7 @@ class VideoGeneratorAgent:
             # Strip audio if user requested no audio (Veo always generates audio natively)
             if not enable_audio:
                 from app.services.video_trimmer import strip_audio_from_video
+
                 logger.info("User requested no audio - stripping audio track...")
                 video_bytes = await strip_audio_from_video(video_bytes)
                 logger.info("Audio stripped from video")
@@ -1063,6 +1204,7 @@ class VideoGeneratorAgent:
             # Monitoring: record video generation usage
             try:
                 from app.services.monitoring import get_monitoring_service
+
                 await get_monitoring_service().record_video_usage(
                     video_id=workflow_id,
                     model=config.model.value,
@@ -1144,7 +1286,7 @@ class VideoGeneratorAgent:
 
     def _get_tool_category(self, state: VideoGenerationState) -> str:
         """Extract tool category from state.
-        
+
         Returns normalized category name (realistic, anime, animation).
         Legacy category names are mapped to new simplified names.
         """
@@ -1154,13 +1296,13 @@ class VideoGeneratorAgent:
             "high_octane_anime": "anime",
             "stylized_3d": "animation",
         }
-        
+
         selected_tool = state.get("selected_tool", {})
         if selected_tool:
             category = selected_tool.get("category", "realistic")
         else:
             category = state.get("category", "realistic")
-        
+
         # Normalize legacy category names to new simplified names
         return category_mapping.get(category, category)
 

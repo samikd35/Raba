@@ -613,17 +613,23 @@ export default function WorkflowDetailPage() {
                             {workflow.script_output.hook && (
                                 <div className="p-4 bg-muted/30 rounded-lg border-l-4 border-primary">
                                     <p className="font-semibold text-primary mb-2">Hook</p>
-                                    <p className="mb-2">{workflow.script_output.hook.script || workflow.script_output.hook}</p>
-                                    {workflow.script_output.hook.visual_direction && (
-                                        <p className="text-xs text-muted-foreground italic mt-2">
-                                            Visual: {workflow.script_output.hook.visual_direction}
-                                        </p>
-                                    )}
-                                    {workflow.script_output.hook.duration_seconds && (
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            Duration: {workflow.script_output.hook.duration_seconds}s
-                                        </p>
-                                    )}
+                                    {(() => {
+                                        const hook = workflow.script_output!.hook as any
+                                        if (typeof hook === 'string') {
+                                            return <p className="mb-2">{hook}</p>
+                                        }
+                                        return (
+                                            <>
+                                                <p className="mb-2">{hook.script}</p>
+                                                {hook.visual_direction && (
+                                                    <p className="text-xs text-muted-foreground italic mt-2">Visual: {hook.visual_direction}</p>
+                                                )}
+                                                {hook.duration_seconds && (
+                                                    <p className="text-xs text-muted-foreground mt-1">Duration: {hook.duration_seconds}s</p>
+                                                )}
+                                            </>
+                                        )
+                                    })()}
                                 </div>
                             )}
                             
