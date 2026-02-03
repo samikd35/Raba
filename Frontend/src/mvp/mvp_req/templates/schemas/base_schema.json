@@ -1,0 +1,347 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "amrg_base_schema",
+  "title": "AMRG PRD Base Schema",
+  "description": "Base schema with common fields required in all MVP PRD outputs",
+  "type": "object",
+  "required": [
+    "template_code",
+    "template_version",
+    "schema_version",
+    "purpose",
+    "objective",
+    "scope",
+    "primary_persona",
+    "must_have_features",
+    "nice_to_have_features",
+    "critical_workflows",
+    "success_signals",
+    "source_artifacts_used"
+  ],
+  "properties": {
+    "template_code": {
+      "type": "string",
+      "enum": ["A1", "A2", "A3", "A4", "A5", "B1", "C1", "C2"],
+      "description": "Template code identifying the product type"
+    },
+    "template_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Version of the template used"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Version of the schema"
+    },
+    "purpose": {
+      "type": "object",
+      "required": ["statement", "validated_problem", "target_persona"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 50,
+          "description": "Why this MVP is being built now"
+        },
+        "validated_problem": {
+          "type": "string",
+          "description": "The validated problem this MVP addresses"
+        },
+        "target_persona": {
+          "type": "string",
+          "description": "Primary persona this MVP serves"
+        }
+      }
+    },
+    "objective": {
+      "type": "object",
+      "required": ["learning_goals", "success_criteria"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "learning_goals": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "What the team wants to learn from this MVP"
+        },
+        "success_criteria": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "How success will be measured"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["in_scope", "out_of_scope"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "in_scope": {
+          "type": "object",
+          "properties": {
+            "user_segments": {"type": "array", "items": {"type": "string"}},
+            "core_flows": {"type": "array", "items": {"type": "string"}},
+            "geography": {"type": "string"},
+            "additional": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "What is explicitly excluded from MVP"
+        }
+      }
+    },
+    "primary_persona": {
+      "type": "object",
+      "required": ["name", "description", "primary_job"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "primary_job": {
+          "type": "object",
+          "properties": {
+            "job_statement": {"type": "string"},
+            "job_type": {"type": "string", "enum": ["functional", "emotional", "social"]}
+          }
+        }
+      }
+    },
+    "must_have_features": {
+      "type": "object",
+      "required": ["features"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["feature_name", "description", "job_supported", "job_type"],
+            "properties": {
+              "feature_name": {"type": "string"},
+              "description": {"type": "string"},
+              "job_supported": {"type": "string"},
+              "job_type": {"type": "string", "enum": ["functional", "emotional", "social"]},
+              "vpc_reference": {"type": "string"},
+              "bmc_reference": {"type": "string"},
+              "advantage": {"type": "string", "description": "What this enables operationally"},
+              "benefit": {"type": "string", "description": "End-user value or outcome"}
+            }
+          },
+          "minItems": 3,
+          "maxItems": 10
+        }
+      }
+    },
+    "nice_to_have_features": {
+      "type": "object",
+      "required": ["features"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["feature_name", "description", "job_supported"],
+            "properties": {
+              "feature_name": {"type": "string"},
+              "description": {"type": "string"},
+              "job_supported": {"type": "string"},
+              "rationale_for_deferral": {"type": "string"},
+              "advantage": {"type": "string", "description": "What this enables operationally"},
+              "benefit": {"type": "string", "description": "End-user value or outcome"}
+            }
+          }
+        }
+      }
+    },
+    "critical_workflows": {
+      "type": "object",
+      "required": ["workflows"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "workflows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["workflow_name", "steps", "is_must_have"],
+            "properties": {
+              "workflow_name": {"type": "string"},
+              "description": {"type": "string"},
+              "steps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 2
+              },
+              "is_must_have": {"type": "boolean"},
+              "value_delivered": {"type": "string"}
+            }
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "constraints_and_nongoals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["constraint", "rationale"],
+        "properties": {
+          "constraint": {"type": "string"},
+          "rationale": {"type": "string"},
+          "category": {
+            "type": "string",
+            "enum": ["feature", "integration", "technical", "compliance", "scope", "operational", "resource", "timeline", "budget", "regulatory", "security", "scalability", "geographic", "capacity", "staffing", "manufacturing", "supply_chain", "quality", "hardware", "certification", "power", "connectivity"]
+          }
+        }
+      },
+      "minItems": 2
+    },
+    "success_signals": {
+      "type": "object",
+      "required": ["quantitative", "qualitative"],
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "quantitative": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["metric_name", "target"],
+            "properties": {
+              "metric_name": {"type": "string"},
+              "description": {"type": "string"},
+              "target": {"type": "string"},
+              "measurement_method": {"type": "string"}
+            }
+          },
+          "minItems": 2,
+          "maxItems": 5
+        },
+        "qualitative": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["signal_name", "description"],
+            "properties": {
+              "signal_name": {"type": "string"},
+              "description": {"type": "string"},
+              "collection_method": {"type": "string"}
+            }
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["constraint", "category", "impact"],
+            "properties": {
+              "constraint": {"type": "string"},
+              "category": {
+                "type": "string",
+                "enum": ["feature", "integration", "technical", "compliance", "scope", "operational", "resource", "timeline", "budget", "regulatory", "security", "scalability", "geographic", "capacity", "staffing", "manufacturing", "supply_chain", "quality", "hardware", "certification", "power", "connectivity"]
+              },
+              "impact": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "assumptions_and_risks": {
+      "type": "object",
+      "properties": {
+        "section_description": {
+          "type": "string",
+          "description": "One-sentence description of this section's purpose"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["assumption", "risk_if_wrong", "mitigation"],
+            "properties": {
+              "assumption": {"type": "string"},
+              "why_it_matters": {"type": "string"},
+              "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+              "risk_if_wrong": {"type": "string"},
+              "mitigation": {"type": "string"}
+            }
+          },
+          "minItems": 2
+        }
+      }
+    },
+    "source_artifacts_used": {
+      "type": "object",
+      "required": ["vps_version", "bmc_version"],
+      "properties": {
+        "vps_version": {"type": "string"},
+        "bmc_version": {"type": "string"},
+        "vpc_version": {"type": "string"},
+        "critique_used": {"type": "boolean"}
+      }
+    },
+    "research": {
+      "type": "object",
+      "properties": {
+        "sources_used": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {"type": "string"},
+              "title": {"type": "string"},
+              "relevance": {"type": "string"}
+            }
+          }
+        },
+        "key_findings": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

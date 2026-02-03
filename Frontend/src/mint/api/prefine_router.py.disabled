@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+MINT API Prefine/Idea Refinement Router
+
+Prefine and idea refinement endpoints extracted from the main app.py file.
+"""
+
+import logging
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+
+from fastapi import APIRouter, HTTPException, Depends, Request, Response, status, Query
+from fastapi.responses import JSONResponse
+
+from .ai.config import get_api_key
+from src.prefine.service import IdeaRefinementService
+from src.prefine.history_service import ProblemRefinerHistoryService
+from src.prefine.models import (
+    IdeaRefinementRequest,
+    IdeaRefinementResponse,
+    EnhancedRefinementResponse,
+    ProblemRefinerHistoryEntry,
+    ProblemRefinerAnalytics,
+    ProblemRefinerSearchRequest,
+    ProblemRefinerSearchResponse,
+    ResearchedStatusUpdate
+)
+
+logger = logging.getLogger(__name__)
+
+# Create router
+router = APIRouter(tags=["prefine"])
+
+# Initialize services
+idea_refinement_service = IdeaRefinementService()
+history_service = ProblemRefinerHistoryService()
+
+
+@router.post("/api/prefine/refine", response_model=EnhancedRefinementResponse)
+@router.post("/api/idea-refinement/complete", response_model=EnhancedRefinementResponse)
+async def refine_idea(
+    request: IdeaRefinementRequest,
+    api_key: str = Depends(get_api_key)
+):
+    """Refine an idea or problem statement using AI enhancement."""
+    try:
+        logger.info(f"Idea refinement requested for: {request.raw_idea[:100]}...")
+        
+        # Process refinement through service
+        result = await idea_refinement_service.refine_idea(request)
+        
+        if result.success:
+            # Store in history
+            try:
+                await history_service.store_refinement_result(
+                    user_id=request.user_id or "anonymous",
+                    original_idea=request.raw_idea,
+                    refined_idea=getattr(result, 'refined_idea', str(result.problem_statements)),
+                    refinement_type="idea_refinement",
+                    context={"parsed_context": result.parsed_context.dict() if hasattr(result, 'parsed_context') else {}},
+                    metadata=getattr(result, 'metadata', {})
+                )
+                logger.info("Refinement result stored in history")
+            except Exception as e:
+                logger.warning(f"Failed to store refinement in history: {e}")
+            
+            return result
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "refinement_failed",
+                    "message": result.error_message or "Idea refinement failed",
+                    "suggestions": result.suggestions
+                }
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error refining idea: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "refinement_error",
+                "message": "Failed to process idea refinement",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/api/idea-refinement/health")
+async def idea_refinement_health():
+    """Health check for idea refinement service."""
+    try:
+        # Check service health
+        health_status = await idea_refinement_service.health_check()
+        
+        return {
+            "status": "healthy" if health_status.get("healthy") else "unhealthy",
+            "service": "idea_refinement",
+            "timestamp": datetime.now().isoformat(),
+            "details": health_status
+        }
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "service": "idea_refinement",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
+
+
+@router.get("/api/prefine/history")
+async def get_refinement_history(
+    user_id: str = Query(..., description="User ID to get history for"),
+    limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    status_filter: Optional[str] = Query(None, description="Filter by status"),
+    api_key: str = Depends(get_api_key)
+):
+    """Get refinement history for a user."""
+    try:
+        logger.info(f"Refinement history requested for user: {user_id}")
+        
+        # Get history from service
+        history_data, total_count = history_service.get_user_history(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            status_filter=status_filter
+        )
+        
+        return {
+            "success": True,
+            "history": history_data,
+            "total_count": total_count,
+            "user_id": user_id,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "has_more": (offset + limit) < total_count
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting refinement history for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "history_retrieval_failed",
+                "message": "Failed to get refinement history",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/api/prefine/history/{session_id}")
+async def get_refinement_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID for security verification"),
+    api_key: str = Depends(get_api_key)
+):
+    """Get details for a specific refinement session."""
+    try:
+        logger.info(f"Refinement session details requested for: {session_id}")
+        
+        # Get session details from service
+        session_details = history_service.get_session_details(
+            session_id=session_id,
+            user_id=user_id
+        )
+        
+        if not session_details:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "session_not_found",
+                    "message": f"Refinement session {session_id} not found"
+                }
+            )
+        
+        return {
+            "success": True,
+            "session": session_details,
+            "session_id": session_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting refinement session {session_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "session_retrieval_failed",
+                "message": "Failed to get refinement session details",
+                "details": str(e)
+            }
+        )
+
+
+@router.post("/api/prefine/history/{result_id}/researched")
+async def mark_as_researched(
+    result_id: str,
+    update: ResearchedStatusUpdate,
+    user_id: str = Query(..., description="User ID for security verification"),
+    api_key: str = Depends(get_api_key)
+):
+    """Mark a refinement result as researched."""
+    try:
+        logger.info(f"Marking refinement result {result_id} as researched")
+        
+        # Update status through service
+        success = history_service.mark_result_researched(
+            result_id=result_id,
+            user_id=user_id
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Researched status updated successfully",
+                "result_id": result_id,
+                "researched": update.researched,
+                "updated_at": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "result_not_found",
+                    "message": f"Refinement result {result_id} not found"
+                }
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating researched status for {result_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "status_update_failed",
+                "message": "Failed to update researched status",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/api/prefine/analytics/{user_id}")
+async def get_user_analytics(
+    user_id: str,
+    api_key: str = Depends(get_api_key)
+):
+    """Get analytics for a user's refinement activity."""
+    try:
+        logger.info(f"Analytics requested for user: {user_id}")
+        
+        # Get analytics from service
+        analytics = history_service.get_analytics_summary(user_id)
+        
+        return {
+            "success": True,
+            "analytics": analytics,
+            "user_id": user_id,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting analytics for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "analytics_failed",
+                "message": "Failed to get user analytics",
+                "details": str(e)
+            }
+        )
+
+
+@router.get("/api/prefine/search")
+async def search_refinements(
+    query: str = Query(..., min_length=3, description="Search query"),
+    user_id: str = Query(..., description="User ID to search within"),
+    limit: int = Query(10, ge=1, le=50, description="Number of results to return"),
+    api_key: str = Depends(get_api_key)
+):
+    """Search through user's refinement history."""
+    try:
+        logger.info(f"Search requested for user {user_id} with query: {query}")
+        
+        # Search through service
+        search_results = history_service.search_sessions_by_idea(
+            user_id=user_id,
+            search_query=query,
+            limit=limit
+        )
+        
+        return {
+            "success": True,
+            "results": search_results,
+            "total_count": len(search_results),
+            "query": query,
+            "user_id": user_id,
+            "search_metadata": {
+                "searched_at": datetime.now().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error searching refinements for user {user_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "search_failed",
+                "message": "Failed to search refinements",
+                "details": str(e)
+            }
+        )

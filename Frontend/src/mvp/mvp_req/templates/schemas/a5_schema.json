@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "amrg_a5_schema",
+  "title": "AMRG PRD Schema - A5 Fintech/Financial Product",
+  "description": "Schema for Fintech/Financial Product MVP PRD",
+  "allOf": [
+    {"$ref": "base_schema.json"}
+  ],
+  "properties": {
+    "template_code": {
+      "const": "A5"
+    },
+    "financial_flow": {
+      "type": "object",
+      "required": ["product_type", "money_movement"],
+      "properties": {
+        "product_type": {
+          "type": "string",
+          "enum": ["lending", "savings", "insurance", "payments", "investments", "agent_banking", "remittance"]
+        },
+        "money_movement": {
+          "type": "object",
+          "properties": {
+            "inflow_sources": {"type": "array", "items": {"type": "string"}},
+            "outflow_destinations": {"type": "array", "items": {"type": "string"}},
+            "holding_mechanism": {"type": "string"}
+          }
+        },
+        "transaction_types": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "product_structure": {
+      "type": "object",
+      "properties": {
+        "pricing_model": {"type": "string"},
+        "fee_structure": {"type": "array", "items": {"type": "string"}},
+        "interest_rates": {"type": "string"},
+        "limits": {
+          "type": "object",
+          "properties": {
+            "minimum": {"type": "string"},
+            "maximum": {"type": "string"},
+            "frequency_limits": {"type": "string"}
+          }
+        }
+      }
+    },
+    "risk_compliance": {
+      "type": "object",
+      "required": ["regulatory_requirements"],
+      "properties": {
+        "regulatory_requirements": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "kyc_requirements": {"type": "string"},
+        "aml_measures": {"type": "array", "items": {"type": "string"}},
+        "risk_controls": {"type": "array", "items": {"type": "string"}},
+        "licenses_needed": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "customer_protection": {
+      "type": "object",
+      "properties": {
+        "data_security_measures": {"type": "array", "items": {"type": "string"}},
+        "dispute_resolution": {"type": "string"},
+        "fraud_prevention": {"type": "array", "items": {"type": "string"}},
+        "transparency_requirements": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "tech_ops_split": {
+      "type": "object",
+      "properties": {
+        "automated_processes": {"type": "array", "items": {"type": "string"}},
+        "manual_processes": {"type": "array", "items": {"type": "string"}},
+        "partner_integrations": {"type": "array", "items": {"type": "string"}},
+        "fallback_procedures": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "required": ["financial_flow", "risk_compliance"]
+}

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Problem Validation Report</title>
+    <style>
+        /* ===== RESET & BASE ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* ===== BRAND COLORS ===== */
+        :root {
+            --brand-blue: #244694;
+            --brand-light-blue: #3B82F6;
+            --brand-green: #10B981;
+            --brand-red: #EF4444;
+            --brand-yellow: #F59E0B;
+            --subsection-blue: #1E40AF;
+            --text-gray: #374151;
+            --source-gray: #4B5563;
+            --section-bg: #F0F4F8;
+            --light-gray: #9CA3AF;
+        }
+
+        /* ===== PAGE SETUP ===== */
+        @page {
+            size: letter;
+            margin: 0;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-size: 10pt;
+            line-height: 1.4;
+            color: #000;
+            background: #fff;
+        }
+
+        .page {
+            width: 8.5in;
+            min-height: 11in;
+            position: relative;
+            padding: 70pt 50pt 55pt 50pt;
+            page-break-after: always;
+            background: #fff;
+        }
+
+        .page:last-child {
+            page-break-after: auto;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50pt;
+            background-color: var(--brand-blue);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40pt;
+            z-index: 1000;
+        }
+
+        .header-logo {
+            height: 25pt;
+            width: auto;
+        }
+
+        .header-logo-text {
+            color: white;
+            font-size: 16pt;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .header-title {
+            color: white;
+            font-size: 10pt;
+            font-weight: normal;
+        }
+
+        /* ===== FOOTER ===== */
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 35pt;
+            background-color: var(--brand-blue);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 40pt;
+            z-index: 1000;
+        }
+
+        .footer-text {
+            color: white;
+            font-size: 9pt;
+        }
+
+        .footer-page {
+            color: white;
+            font-size: 9pt;
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .content {
+            padding-top: 20pt;
+        }
+
+        /* ===== TITLE SECTION ===== */
+        .report-title {
+            font-size: 22pt;
+            font-weight: bold;
+            color: var(--brand-blue);
+            text-align: center;
+            margin-bottom: 8pt;
+        }
+
+        .report-metadata {
+            font-size: 10pt;
+            color: var(--light-gray);
+            text-align: center;
+            margin-bottom: 15pt;
+        }
+
+        .title-separator {
+            border: none;
+            border-top: 2pt solid var(--brand-blue);
+            margin: 15pt 0;
+        }
+
+        /* ===== SECTION HEADERS ===== */
+        .section-header {
+            background-color: var(--section-bg);
+            border-left: 4pt solid var(--brand-blue);
+            padding: 8pt 12pt;
+            margin: 20pt 0 12pt 0;
+        }
+
+        .section-header h2 {
+            font-size: 13pt;
+            font-weight: bold;
+            color: var(--brand-blue);
+            margin: 0;
+        }
+
+        /* ===== SUBSECTION HEADERS ===== */
+        .subsection {
+            font-size: 12pt;
+            font-weight: bold;
+            color: var(--brand-blue);
+            margin: 14pt 0 6pt 0;
+        }
+
+        .sub-subsection {
+            font-size: 10pt;
+            font-weight: bold;
+            color: var(--subsection-blue);
+            margin: 10pt 0 4pt 0;
+        }
+
+        /* ===== BODY TEXT ===== */
+        .body-text {
+            font-size: 10pt;
+            color: #000;
+            line-height: 1.4;
+            text-align: justify;
+            margin-bottom: 8pt;
+        }
+
+        .exec-summary-text {
+            font-size: 10pt;
+            color: var(--text-gray);
+            line-height: 1.5;
+            text-align: justify;
+            margin-bottom: 10pt;
+        }
+
+        /* ===== SOURCES ===== */
+        .source-item {
+            font-size: 9pt;
+            color: var(--source-gray);
+            line-height: 1.3;
+            margin-bottom: 4pt;
+            padding-left: 20pt;
+            text-indent: -20pt;
+        }
+
+        .source-item a {
+            color: var(--brand-light-blue);
+            text-decoration: none;
+        }
+
+        .source-item a:hover {
+            text-decoration: underline;
+        }
+
+        .source-title {
+            font-weight: bold;
+        }
+
+        /* ===== BULLET POINTS ===== */
+        .bullet-list {
+            margin-left: 20pt;
+            margin-bottom: 8pt;
+        }
+
+        .bullet-list li {
+            margin-bottom: 4pt;
+            list-style-type: disc;
+        }
+
+        /* ===== CITATION LINKS ===== */
+        .citation-link {
+            color: var(--brand-light-blue);
+            text-decoration: none;
+        }
+
+        .citation-link:hover {
+            text-decoration: underline;
+        }
+
+        /* ===== PAGE BREAK ===== */
+        .page-break {
+            page-break-before: always;
+            margin-top: 30pt;
+        }
+
+        /* ===== PRINT STYLES ===== */
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            .header, .footer {
+                position: fixed;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            .page {
+                page-break-after: always;
+            }
+        }
+
+        /* ===== SPACERS ===== */
+        .spacer-small {
+            height: 10pt;
+        }
+
+        .spacer-medium {
+            height: 15pt;
+        }
+
+        .spacer-large {
+            height: 30pt;
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-logo-text">YUBA</div>
+        <!-- Or use actual logo: <img src="logo.png" alt="Yuba Logo" class="header-logo"> -->
+        <div class="header-title">Problem Validation Report</div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <div class="footer-text">© 2025 Yuba | yubanow.com</div>
+        <div class="footer-page">Page <span class="page-number">1</span></div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="page">
+        <div class="content">
+            <!-- TITLE -->
+            <h1 class="report-title">Problem Validation Report</h1>
+            <div class="report-metadata">Generated: {{generated_date}}</div>
+            <hr class="title-separator">
+
+            <!-- 1. EXECUTIVE SUMMARY -->
+            <div class="section-header">
+                <h2>1. Executive Summary</h2>
+            </div>
+            <div class="exec-summary-text">
+                {{executive_summary}}
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 2: INDUSTRY ANALYSIS -->
+    <div class="page page-break">
+        <div class="content">
+            <div class="section-header">
+                <h2>2. Industry Analysis</h2>
+            </div>
+            
+            <!-- Dynamic subsections will be inserted here -->
+            <div class="industry-content">
+                {{industry_analysis}}
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 3: PESTEL ANALYSIS -->
+    <div class="page page-break">
+        <div class="content">
+            <div class="section-header">
+                <h2>3. PESTEL Analysis &amp; Market Challenges</h2>
+            </div>
+            
+            <!-- Dynamic subsections will be inserted here -->
+            <div class="pestel-content">
+                {{challenges_analysis}}
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 4: RECOMMENDATIONS -->
+    <div class="page page-break">
+        <div class="content">
+            <div class="section-header">
+                <h2>4. Strategic Recommendations</h2>
+            </div>
+            
+            <div class="body-text">
+                {{recommendations}}
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 5: SOURCES -->
+    <div class="page page-break">
+        <div class="content">
+            <div class="section-header">
+                <h2>5. Sources &amp; References</h2>
+            </div>
+            <div class="spacer-small"></div>
+            
+            <!-- Sources list -->
+            <div class="sources-list">
+                {{sources}}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Page numbering for print
+        document.addEventListener('DOMContentLoaded', function() {
+            const pages = document.querySelectorAll('.page');
+            pages.forEach((page, index) => {
+                const pageNum = page.querySelector('.page-number');
+                if (pageNum) {
+                    pageNum.textContent = index + 1;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

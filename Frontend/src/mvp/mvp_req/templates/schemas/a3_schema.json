@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "amrg_a3_schema",
+  "title": "AMRG PRD Schema - A3 Platform/Marketplace",
+  "description": "Schema for Platform/Marketplace MVP PRD (two-sided or multi-sided)",
+  "allOf": [
+    {"$ref": "base_schema.json"}
+  ],
+  "properties": {
+    "template_code": {
+      "const": "A3"
+    },
+    "platform_sides": {
+      "type": "object",
+      "required": ["sides", "priority_side", "initial_niche"],
+      "properties": {
+        "sides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["side_name", "description"],
+            "properties": {
+              "side_name": {"type": "string"},
+              "description": {"type": "string"},
+              "example_users": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "minItems": 2
+        },
+        "priority_side": {
+          "type": "string",
+          "description": "Which side to prioritize in MVP"
+        },
+        "initial_niche": {
+          "type": "object",
+          "properties": {
+            "segment": {"type": "string"},
+            "geography": {"type": "string"},
+            "use_case": {"type": "string"}
+          }
+        }
+      }
+    },
+    "matching_flow": {
+      "type": "object",
+      "required": ["core_interaction", "matching_path"],
+      "properties": {
+        "core_interaction": {"type": "string"},
+        "matching_path": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 2
+        },
+        "manual_vs_automated": {
+          "type": "object",
+          "properties": {
+            "manual_steps": {"type": "array", "items": {"type": "string"}},
+            "automated_steps": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "onboarding_structure": {
+      "type": "object",
+      "properties": {
+        "per_side_requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "side_name": {"type": "string"},
+              "required_info": {"type": "array", "items": {"type": "string"}},
+              "onboarding_steps": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "deferred_complexity": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "trust_framework": {
+      "type": "object",
+      "properties": {
+        "trust_mechanisms": {"type": "array", "items": {"type": "string"}},
+        "eligibility_rules": {"type": "array", "items": {"type": "string"}},
+        "dispute_handling": {"type": "string"}
+      }
+    },
+    "payments_transactions": {
+      "type": "object",
+      "required": ["payment_model"],
+      "properties": {
+        "payment_model": {"type": "string", "enum": ["online", "offline", "hybrid"]},
+        "transaction_tracking": {"type": "string"},
+        "platform_role": {"type": "string", "enum": ["holds_funds", "facilitates_only", "hybrid"]}
+      }
+    },
+    "launch_strategy": {
+      "type": "object",
+      "properties": {
+        "seeding_approach": {"type": "string"},
+        "manual_interventions": {"type": "array", "items": {"type": "string"}},
+        "imbalance_monitoring": {"type": "string"}
+      }
+    }
+  },
+  "required": ["platform_sides", "matching_flow"]
+}

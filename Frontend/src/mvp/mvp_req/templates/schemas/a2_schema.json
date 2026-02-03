@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "amrg_a2_schema",
+  "title": "AMRG PRD Schema - A2 Digital Content/EdTech",
+  "description": "Schema for Digital Content/Course/EdTech MVP PRD",
+  "allOf": [
+    {"$ref": "base_schema.json"}
+  ],
+  "properties": {
+    "template_code": {
+      "const": "A2"
+    },
+    "learning_journey": {
+      "type": "object",
+      "required": ["journey_stages", "completion_path"],
+      "properties": {
+        "journey_stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stage_name": {"type": "string"},
+              "learning_objectives": {"type": "array", "items": {"type": "string"}},
+              "duration_estimate": {"type": "string"}
+            }
+          },
+          "minItems": 1
+        },
+        "completion_path": {"type": "string"},
+        "prerequisites": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "content_format": {
+      "type": "object",
+      "required": ["primary_format", "delivery_method"],
+      "properties": {
+        "primary_format": {
+          "type": "string",
+          "enum": ["video", "text", "interactive", "live", "mixed"]
+        },
+        "delivery_method": {
+          "type": "string",
+          "enum": ["self_paced", "cohort_based", "hybrid", "live_only"]
+        },
+        "content_types": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "interaction_elements": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "engagement_support": {
+      "type": "object",
+      "properties": {
+        "community_features": {"type": "array", "items": {"type": "string"}},
+        "instructor_support": {"type": "string"},
+        "peer_interaction": {"type": "string"},
+        "gamification_elements": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "assessment_proof": {
+      "type": "object",
+      "properties": {
+        "assessment_methods": {"type": "array", "items": {"type": "string"}},
+        "certification_type": {
+          "type": "string",
+          "enum": ["certificate", "badge", "credential", "none", "deferred"]
+        },
+        "progress_tracking": {"type": "string"}
+      }
+    },
+    "operational_requirements": {
+      "type": "object",
+      "properties": {
+        "content_creation_owner": {"type": "string"},
+        "review_process": {"type": "string"},
+        "update_frequency": {"type": "string"},
+        "partners_involved": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "required": ["learning_journey", "content_format"]
+}

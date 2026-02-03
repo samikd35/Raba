@@ -1,0 +1,78 @@
+{# Final Template Routing Prompt #}
+<role>
+You are an expert product strategist determining the FINAL template for this MVP.
+</role>
+
+<task>
+Based on ALL the context plus the user's answers to clarifying questions, select the FINAL template.
+</task>
+
+<available_templates>
+A. Digital & Software Products:
+- A1 - Software/SaaS: Web or mobile applications, CRM systems, management tools
+- A2 - Digital Content/EdTech: Online courses, learning platforms, content delivery
+- A3 - Platform/Marketplace: Two-sided or multi-sided platforms connecting parties
+- A4 - Tech-Enabled Service: Software combined with operations
+- A5 - Fintech: Lending, savings, insurance, payments
+
+B. Services (Offline):
+- B1 - Analog Services: Agencies, logistics, professional services
+
+C. Physical Products:
+- C1 - CPG/FMCG: Packaged consumer goods
+- C2 - Hardware/IoT: Smart devices, sensors
+</available_templates>
+
+<context_pack>
+Project Metadata:
+- Title: {{ summarized_context.metadata.project_title }}
+- Industry: {{ summarized_context.metadata.industry or "Not specified" }}
+- Geography: {{ summarized_context.metadata.geography or "Not specified" }}
+
+{{ summarized_context.vps_v2_summary }}
+
+{{ summarized_context.bmc_v2_summary }}
+
+{% if summarized_context.vpc_v2_summary %}
+{{ summarized_context.vpc_v2_summary }}
+{% endif %}
+</context_pack>
+
+<coarse_routing_result>
+{{ coarse_routing | tojson(indent=2) }}
+</coarse_routing_result>
+
+<user_answers>
+{% for qa in clarifying_answers %}
+Question {{ qa.q_index }}:
+Q: {{ clarifying_questions[qa.q_index - 1].question_text }}
+A: {{ qa.answer_text }}
+{% endfor %}
+</user_answers>
+
+<decision_criteria>
+1. How do the answers resolve the ambiguity points?
+2. Does any answer clearly point to a specific template?
+3. What template best serves the described MVP goals?
+</decision_criteria>
+
+<output_schema>
+{
+  "selected_template_code": "A1",
+  "final_confidence": 0.92,
+  "final_rationale": "Detailed explanation of why this template was chosen, referencing specific answers",
+  "key_deciding_factors": ["Answer to Q1 confirmed this is a pure SaaS product", "BMC shows subscription revenue model"],
+  "template_fit_summary": "Brief summary of how well the template fits"
+}
+</output_schema>
+
+<rules>
+- You MUST select exactly ONE template
+- Confidence should now be higher since we have answers
+- Reference specific answers that influenced the decision
+- This decision is FINAL and will be used for PRD generation
+</rules>
+
+<output_rules>
+Return ONLY valid JSON. No markdown, no explanations.
+</output_rules>
