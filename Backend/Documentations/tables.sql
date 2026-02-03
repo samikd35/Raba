@@ -48,6 +48,7 @@ CREATE TABLE public.tools (
   success_rate double precision DEFAULT 0.0,
   parameters_schema jsonb,
   original_idea text,
+  source_video_url text,
   created_by uuid,
   improvement_history jsonb DEFAULT '[]'::jsonb,
   last_improved_at timestamp with time zone,

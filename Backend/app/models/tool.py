@@ -488,6 +488,40 @@ class ToolImproveRequest(BaseModel):
     )
 
 
+class ToolVideoAnalysis(BaseModel):
+    """Structured analysis of an uploaded reference video for tool creation."""
+
+    script_style: str = Field(..., description="Narrative/script style (e.g., voiceover, dialogue, text-driven)")
+    visual_style: str = Field(..., description="Overall visual aesthetics and art direction")
+    camera_grammar: str = Field(..., description="Camera angles, framing, and movement language")
+    editing_pacing: str = Field(..., description="Editing rhythm, transitions, pacing")
+    audio_profile: str = Field(..., description="Audio characteristics: VO, music, SFX, silence")
+    text_overlay_style: str = Field(
+        ..., description="On-screen text style and usage (or explicit absence)"
+    )
+    key_motifs: list[str] = Field(
+        default_factory=list, description="Recurring visual motifs, props, or themes"
+    )
+    negative_constraints: list[str] = Field(
+        default_factory=list, description="Elements to avoid when recreating the style"
+    )
+    tool_idea: str = Field(
+        ..., description="Derived tool idea text for enhancement"
+    )
+    suggested_tool_name: Optional[str] = Field(
+        default=None, description="Optional suggested tool name"
+    )
+
+
+class ToolVideoCreateRequest(BaseModel):
+    """Request schema for creating a tool from a video preview draft."""
+
+    draft_id: str = Field(..., description="Draft identifier from preview step")
+    tool_name: Optional[str] = Field(default=None, description="Override tool name")
+    category: Optional[CategoryEnum] = Field(default=None, description="Optional category override")
+    notes: Optional[str] = Field(default=None, description="Optional user constraints or notes")
+
+
 class ImprovementRecord(BaseModel):
     """Record of a tool improvement."""
     
@@ -546,6 +580,15 @@ class ToolEnhancementResponse(BaseModel):
     )
 
 
+class ToolVideoPreviewResponse(BaseModel):
+    """Response for video-based tool preview."""
+
+    draft_id: str = Field(..., description="Draft identifier for later creation")
+    source_video_url: str = Field(..., description="Public URL of the uploaded reference video")
+    analysis: ToolVideoAnalysis = Field(..., description="Structured video analysis")
+    preview: ToolEnhancementResponse = Field(..., description="AI-enhanced tool preview")
+
+
 class ToolResponse(BaseModel):
     """
     Full tool response for API endpoints.
@@ -564,6 +607,7 @@ class ToolResponse(BaseModel):
     video_prompt_template: Optional[str] = Field(default=None, description="Video prompt template")
     parameters_schema: Optional[dict[str, Any]] = Field(default=None, description="Parameters JSON Schema")
     original_idea: Optional[str] = Field(default=None, description="Original user idea")
+    source_video_url: Optional[str] = Field(default=None, description="Reference video URL used for tool creation")
     is_active: bool = Field(default=True, description="Whether tool is available")
     priority: int = Field(default=0, description="Selection priority")
     version: int = Field(default=1, description="Tool version")

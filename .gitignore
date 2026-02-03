@@ -17,11 +17,9 @@ yarn-debug.log*
 yarn-error.log*
 
 # Environment
-.env
 .venv
 env/
 venv/
-.env.local
 .env*.local
 
 # IDE
@@ -30,3 +28,4 @@ venv/
 *.swp
 *.swo
 .DS_Store
+config.bat

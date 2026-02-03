@@ -4,8 +4,9 @@ Full CRUD operations for video generation tools with AI-enhanced creation.
 """
 
 from typing import Optional, Any
+import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, File, Form, UploadFile, status
 
 from app.models.tool import (
     DeleteResponse,
@@ -17,6 +18,9 @@ from app.models.tool import (
     ToolListResponse,
     ToolResponse,
     ToolUpdate,
+    ToolVideoCreateRequest,
+    ToolVideoPreviewResponse,
+    ToolVideoAnalysis,
     PromptBulkUpdateRequest,
     PromptBulkUpdateResponse,
     ToolPromptUpdateRequest,
@@ -25,6 +29,8 @@ from app.models.tool import (
 )
 from app.services.tool_enhancer import get_tool_enhancer
 from app.services.tool_executor import get_tool_executor, ParameterValidationError
+from app.services.video_tool_analyzer import get_video_tool_analyzer, VideoToolAnalyzerError
+from app.services.redis import get_redis_service
 from app.tools.registry import get_tool_registry, ToolNotFoundError
 from app.utils.logging import (
     get_logger,
@@ -42,10 +48,95 @@ import time
 from app.services.prompt_builder import get_prompt_builder
 from app.services.template_validation import get_template_validator
 from app.utils.security import validate_uuid
+from app.utils.cache import CacheKeys
+from app.models.workflow import CategoryEnum
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _normalize_category_override(category: Optional[CategoryEnum]) -> Optional[CategoryEnum]:
+    if category and category != CategoryEnum.AUTO:
+        return category
+    return None
+
+
+async def _enhance_tool_with_validation(request: ToolCreate) -> ToolEnhancementResponse:
+    enhancer = get_tool_enhancer()
+    validator = get_template_validator()
+    builder = get_prompt_builder()
+
+    max_retries = 2
+    enhanced = None
+    validation_errors = None
+
+    for attempt in range(max_retries + 1):
+        with log_operation(logger, f"Enhance tool idea with Gemini (attempt {attempt + 1})"):
+            enhanced = await enhancer.enhance_tool_idea(
+                request,
+                retry_count=attempt,
+                max_retries=max_retries,
+                validation_errors=validation_errors,
+            )
+
+        temp_errors: list[str] = []
+        if enhanced.script_prompt_template:
+            ok, errs = builder.quality_validate(
+                enhanced.script_prompt_template, ["topic", "tone", "duration"], 150
+            )
+            if not ok:
+                temp_errors.extend([f"script: {e}" for e in errs])
+            ok2, errs2 = validator.validate_script(enhanced.script_prompt_template)
+            if not ok2:
+                temp_errors.extend([f"script: {e}" for e in errs2])
+
+        if enhanced.image_prompt_template:
+            ok, errs = builder.quality_validate(
+                enhanced.image_prompt_template, ["scene_description", "style"], 150
+            )
+            if not ok:
+                temp_errors.extend([f"image: {e}" for e in errs])
+            ok2, errs2 = validator.validate_image(enhanced.image_prompt_template)
+            if not ok2:
+                temp_errors.extend([f"image: {e}" for e in errs2])
+
+        if enhanced.video_prompt_template:
+            ok, errs = builder.quality_validate(
+                enhanced.video_prompt_template, ["script", "duration"], 150
+            )
+            if not ok:
+                temp_errors.extend([f"video: {e}" for e in errs])
+            ok2, errs2 = validator.validate_video(enhanced.video_prompt_template)
+            if not ok2:
+                temp_errors.extend([f"video: {e}" for e in errs2])
+
+        if not temp_errors:
+            break
+
+        validation_errors = temp_errors
+        if attempt < max_retries:
+            log_warning_msg(
+                logger,
+                f"Validation failed on attempt {attempt + 1}, retrying with fixes: {validation_errors}",
+            )
+        else:
+            log_warning_msg(
+                logger,
+                f"Validation failed after all retries: {validation_errors}",
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Tool template validation failed",
+                    "errors": validation_errors,
+                },
+            )
+
+    if not enhanced:
+        raise HTTPException(status_code=500, detail="Tool enhancement failed")
+
+    return enhanced
 
 
 @router.get("", response_model=ToolListResponse)
@@ -147,81 +238,7 @@ async def create_tool(request: ToolCreate) -> ToolResponse:
     )
 
     try:
-        enhancer = get_tool_enhancer()
-        validator = get_template_validator()
-        builder = get_prompt_builder()
-
-        # Retry logic for validation failures
-        max_retries = 2
-        enhanced = None
-        validation_errors = None
-
-        for attempt in range(max_retries + 1):
-            with log_operation(logger, f"Enhance tool idea with Gemini (attempt {attempt + 1})"):
-                enhanced = await enhancer.enhance_tool_idea(
-                    request,
-                    retry_count=attempt,
-                    max_retries=max_retries,
-                    validation_errors=validation_errors,
-                )
-
-            # Validate templates
-            temp_errors: list[str] = []
-            if enhanced.script_prompt_template:
-                ok, errs = builder.quality_validate(
-                    enhanced.script_prompt_template, ["topic", "tone", "duration"], 150
-                )
-                if not ok:
-                    temp_errors.extend([f"script: {e}" for e in errs])
-                ok2, errs2 = validator.validate_script(enhanced.script_prompt_template)
-                if not ok2:
-                    temp_errors.extend([f"script: {e}" for e in errs2])
-
-            if enhanced.image_prompt_template:
-                ok, errs = builder.quality_validate(
-                    enhanced.image_prompt_template, ["scene_description", "style"], 150
-                )
-                if not ok:
-                    temp_errors.extend([f"image: {e}" for e in errs])
-                ok2, errs2 = validator.validate_image(enhanced.image_prompt_template)
-                if not ok2:
-                    temp_errors.extend([f"image: {e}" for e in errs2])
-
-            if enhanced.video_prompt_template:
-                ok, errs = builder.quality_validate(
-                    enhanced.video_prompt_template, ["script", "duration"], 150
-                )
-                if not ok:
-                    temp_errors.extend([f"video: {e}" for e in errs])
-                ok2, errs2 = validator.validate_video(enhanced.video_prompt_template)
-                if not ok2:
-                    temp_errors.extend([f"video: {e}" for e in errs2])
-
-            if not temp_errors:
-                # Validation passed, break out of retry loop
-                break
-            else:
-                validation_errors = temp_errors
-                if attempt < max_retries:
-                    log_warning_msg(
-                        logger,
-                        f"Validation failed on attempt {attempt + 1}, retrying with fixes: {validation_errors}",
-                    )
-                else:
-                    log_warning_msg(
-                        logger,
-                        f"Validation failed after all retries: {validation_errors}",
-                    )
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "message": "Tool template validation failed",
-                            "errors": validation_errors,
-                        },
-                    )
-
-        if not enhanced:
-            raise HTTPException(status_code=500, detail="Tool enhancement failed")
+        enhanced = await _enhance_tool_with_validation(request)
 
         log_key_value(logger, "Generated tool_id", enhanced.tool_id)
         log_key_value(logger, "Category", enhanced.category.value)
@@ -279,6 +296,181 @@ async def preview_enhancement(request: ToolCreate) -> ToolEnhancementResponse:
         log_request_end(logger, "POST", "/api/v1/tools/preview", 500, duration_ms)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post("/from-video/preview", response_model=ToolVideoPreviewResponse)
+async def preview_tool_from_video(
+    reference_video: UploadFile = File(..., description="Reference video (max 50MB, mp4/mov/webm)"),
+    tool_name: Optional[str] = Form(default=None),
+    category: Optional[CategoryEnum] = Form(default=None),
+    notes: Optional[str] = Form(default=None),
+) -> ToolVideoPreviewResponse:
+    """
+    Preview tool creation from an uploaded reference video.
+
+    Returns analysis, preview tool, and a draft_id for creation.
+    """
+    start_time = time.time()
+    log_request_start(
+        logger,
+        "POST",
+        "/api/v1/tools/from-video/preview",
+        {
+            "filename": reference_video.filename if reference_video else None,
+            "has_tool_name_override": bool(tool_name),
+            "category_override": category.value if category else None,
+        },
+    )
+
+    redis = get_redis_service()
+    if not redis.is_available():
+        log_request_end(logger, "POST", "/api/v1/tools/from-video/preview", 503, 0)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis required for preview/create flow",
+        )
+
+    draft_id = str(uuid.uuid4())
+    analyzer = get_video_tool_analyzer()
+    try:
+        analysis, source_video_url = await analyzer.analyze_video(
+            reference_video, draft_id=draft_id, notes=notes
+        )
+    except VideoToolAnalyzerError as e:
+        duration_ms = (time.time() - start_time) * 1000
+        log_error_msg(logger, f"Video analysis failed: {e}")
+        log_request_end(logger, "POST", "/api/v1/tools/from-video/preview", 400, duration_ms)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    tool_name_final = tool_name or analysis.suggested_tool_name or "Video Style Tool"
+    tool_name_final = tool_name_final[:100]
+    if len(tool_name_final) < 3:
+        tool_name_final = "Video Style Tool"
+    base_idea = analysis.tool_idea
+    idea = base_idea
+    if notes:
+        idea = f"{base_idea}\nUser constraints: {notes}"
+    idea = idea[:2000]
+    if len(idea) < 10:
+        idea = f"{idea} Style reference derived from video."
+
+    category_override = _normalize_category_override(category)
+    enhancer = get_tool_enhancer()
+    try:
+        enhanced = await enhancer.enhance_tool_idea(
+            ToolCreate(tool_name=tool_name_final, idea=idea, category=category_override)
+        )
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        log_error_msg(logger, f"Tool preview enhancement failed: {e}")
+        log_request_end(logger, "POST", "/api/v1/tools/from-video/preview", 500, duration_ms)
+        raise HTTPException(status_code=500, detail="Tool preview enhancement failed")
+
+    cache_key = CacheKeys.tool_video_draft(draft_id)
+    ttl = CacheKeys.tool_video_draft_ttl()
+    cache_payload = {
+        "analysis": analysis.model_dump(),
+        "source_video_url": source_video_url,
+        "base_idea": base_idea,
+        "notes": notes,
+        "suggested_tool_name": tool_name_final,
+        "category_override": category_override.value if category_override else None,
+        "cached_at": time.time(),
+    }
+
+    cached = await redis.set(cache_key, cache_payload, ttl=ttl)
+    if not cached:
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", "/api/v1/tools/from-video/preview", 503, duration_ms)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to cache preview draft",
+        )
+
+    duration_ms = (time.time() - start_time) * 1000
+    log_success(logger, f"Video tool preview generated: {draft_id}")
+    log_request_end(logger, "POST", "/api/v1/tools/from-video/preview", 200, duration_ms)
+    return ToolVideoPreviewResponse(
+        draft_id=draft_id,
+        source_video_url=source_video_url,
+        analysis=analysis,
+        preview=enhanced,
+    )
+
+
+@router.post("/from-video", response_model=ToolResponse, status_code=201)
+async def create_tool_from_video(request: ToolVideoCreateRequest) -> ToolResponse:
+    """Create a tool from a video preview draft."""
+    start_time = time.time()
+    log_request_start(
+        logger,
+        "POST",
+        "/api/v1/tools/from-video",
+        {"draft_id": request.draft_id},
+    )
+
+    redis = get_redis_service()
+    if not redis.is_available():
+        log_request_end(logger, "POST", "/api/v1/tools/from-video", 503, 0)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis required for preview/create flow",
+        )
+
+    cache_key = CacheKeys.tool_video_draft(request.draft_id)
+    cached = await redis.get(cache_key)
+    if not cached:
+        duration_ms = (time.time() - start_time) * 1000
+        log_request_end(logger, "POST", "/api/v1/tools/from-video", 400, duration_ms)
+        raise HTTPException(status_code=400, detail="Draft expired or not found")
+
+    try:
+        analysis = ToolVideoAnalysis.model_validate(cached.get("analysis") or {})
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        log_error_msg(logger, f"Invalid cached analysis: {e}")
+        log_request_end(logger, "POST", "/api/v1/tools/from-video", 400, duration_ms)
+        raise HTTPException(status_code=400, detail="Draft analysis invalid or corrupted")
+    source_video_url = cached.get("source_video_url") or None
+    base_idea = cached.get("base_idea") or analysis.tool_idea
+    notes = request.notes if request.notes is not None else cached.get("notes")
+    idea = base_idea
+    if notes:
+        idea = f"{base_idea}\nUser constraints: {notes}"
+    idea = idea[:2000]
+    if len(idea) < 10:
+        idea = f"{idea} Style reference derived from video."
+
+    tool_name = request.tool_name or cached.get("suggested_tool_name") or analysis.suggested_tool_name or "Video Style Tool"
+    tool_name = tool_name[:100]
+    if len(tool_name) < 3:
+        tool_name = "Video Style Tool"
+    category_override = _normalize_category_override(request.category)
+    if not category_override:
+        cached_category = cached.get("category_override")
+        if cached_category:
+            try:
+                category_override = CategoryEnum(cached_category)
+            except Exception:
+                category_override = None
+
+    enhanced = await _enhance_tool_with_validation(
+        ToolCreate(tool_name=tool_name, idea=idea, category=category_override)
+    )
+
+    registry = get_tool_registry()
+    with log_operation(logger, "Save tool to database"):
+        tool = await registry.create(
+            enhanced_tool=enhanced,
+            original_idea=idea,
+            source_video_url=source_video_url,
+        )
+
+    await redis.delete(cache_key)
+
+    duration_ms = (time.time() - start_time) * 1000
+    log_success(logger, f"Tool created from video: {tool.tool_id}")
+    log_request_end(logger, "POST", "/api/v1/tools/from-video", 201, duration_ms)
+    return tool
 
 @router.put("/{tool_id}", response_model=ToolResponse)
 async def update_tool(tool_id: str, request: ToolUpdate) -> ToolResponse:
