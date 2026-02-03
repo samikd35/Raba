@@ -73,6 +73,11 @@ from app.services.hitl_service import (
     HITLServiceError,
     get_hitl_service,
 )
+from app.services.video_tool_analyzer import (
+    VideoToolAnalyzerError,
+    VideoToolAnalyzerService,
+    get_video_tool_analyzer,
+)
 
 __all__ = [
     "CreativeIdeationError",
@@ -107,6 +112,8 @@ __all__ = [
     "ToolEnhancerService",
     "ToolExecutionError",
     "ToolExecutor",
+    "VideoToolAnalyzerError",
+    "VideoToolAnalyzerService",
     "get_creative_ideation_service",
     "get_deep_research_service",
     "get_gemini_service",
@@ -118,6 +125,7 @@ __all__ = [
     "get_redis_service",
     "get_tool_enhancer",
     "get_tool_executor",
+    "get_video_tool_analyzer",
     "HITLService",
     "HITLServiceError",
     "get_hitl_service",

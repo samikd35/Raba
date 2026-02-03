@@ -114,6 +114,24 @@ class CacheKeys:
             Cache key: raba:tools:category:{category}
         """
         return f"{cls.PREFIX}tools:category:{category}"
+
+    @classmethod
+    def tool_video_draft(cls, draft_id: str) -> str:
+        """
+        Generate cache key for tool creation drafts from video.
+
+        Args:
+            draft_id: Draft identifier
+
+        Returns:
+            Cache key: raba:tools:video_draft:{draft_id}
+        """
+        return f"{cls.PREFIX}tools:video_draft:{draft_id}"
+
+    @classmethod
+    def tool_video_draft_ttl(cls) -> int:
+        """Get TTL for tool video drafts (1 hour)."""
+        return cls.TTL_SHORT
     
     @classmethod
     def user_session(cls, user_id: str) -> str:

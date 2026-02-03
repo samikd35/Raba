@@ -28,6 +28,8 @@ Tools can be created from simple ideas - Gemini 2.5 Flash enhances them into ful
 | `PUT` | `/api/v1/tools/{tool_id}` | Update tool |
 | `DELETE` | `/api/v1/tools/{tool_id}` | Delete tool (soft) |
 | `POST` | `/api/v1/tools/preview` | Preview AI enhancement |
+| `POST` | `/api/v1/tools/from-video/preview` | Preview tool creation from video |
+| `POST` | `/api/v1/tools/from-video` | Create tool from video preview |
 | `POST` | `/api/v1/tools/{tool_id}/improve` | Improve existing tool |
 | `POST` | `/api/v1/tools/{tool_id}/execute` | Execute tool with topic |
 | `POST` | `/api/v1/tools/prompts/bulk-update` | Bulk update prompt templates |
@@ -177,6 +179,7 @@ Create a new tool from a user idea. Gemini 2.5 Flash enhances the idea into a fu
     }
   },
   "original_idea": "A tool for creating cyberpunk city scenes...",
+  "source_video_url": null,
   "is_active": true,
   "priority": 0,
   "version": 1,
@@ -379,6 +382,84 @@ curl -X POST "http://localhost:8000/api/v1/tools/preview" \
     "idea": "Visualize data and algorithms as flowing rivers of light"
   }'
 ```
+
+---
+
+## POST /api/v1/tools/from-video/preview
+
+Preview tool creation from an uploaded reference video.
+
+### Request
+
+**Content-Type:** `multipart/form-data`
+
+Form fields:
+- `reference_video` (file, required) — mp4/mov/webm, max 50MB
+- `tool_name` (string, optional) — override suggested tool name
+- `category` (enum, optional) — category override
+- `notes` (string, optional) — user constraints to apply
+
+### Response
+
+**Status:** `200 OK`
+
+```json
+{
+  "draft_id": "uuid",
+  "source_video_url": "https://...",
+  "analysis": {
+    "script_style": "Voiceover explainers",
+    "visual_style": "Cinematic macro realism",
+    "camera_grammar": "Slow push-ins, shallow DOF",
+    "editing_pacing": "Fast hook, medium pacing",
+    "audio_profile": "VO + ambient music",
+    "text_overlay_style": "Minimal lower-third captions",
+    "key_motifs": ["glowing particles", "macro textures"],
+    "negative_constraints": ["no watermarks", "no logos"],
+    "tool_idea": "Create cinematic macro explainer videos...",
+    "suggested_tool_name": "Cinematic Macro Explainers"
+  },
+  "preview": {
+    "tool_id": "cinematic_macro_explainers",
+    "tool_name": "Cinematic Macro Explainers",
+    "category": "realistic",
+    "description": "..."
+  }
+}
+```
+
+### Example
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/tools/from-video/preview" \
+  -F "reference_video=@/path/to/reference.mp4" \
+  -F "notes=Keep it fast-paced and no on-screen text"
+```
+
+---
+
+## POST /api/v1/tools/from-video
+
+Create a tool from a video preview draft.
+
+### Request
+
+**Content-Type:** `application/json`
+
+```json
+{
+  "draft_id": "uuid",
+  "tool_name": "Optional override",
+  "category": "realistic",
+  "notes": "Extra constraints"
+}
+```
+
+### Response
+
+**Status:** `201 Created`
+
+Full `ToolResponse` (includes `source_video_url`).
 
 ---
 
