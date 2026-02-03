@@ -52,3 +52,13 @@ The tool creation and enhancement system (`Backend/app/services/tool_enhancer.py
 - Update `tables.sql` when modifying table structures or constraints
 - Sync schema changes with `Guides/RABA_Architecture.md` Section 8 (Database Schema)
 - Key tables: `workflows`, `tools`, `media`, `config`
+
+## Workflows & Commands
+- Backend API workflow: create generation via `POST /api/v1/generate` or `/api/v1/generate/with-image`, then poll `GET /api/v1/workflows/{id}` (see `Backend/Documentations/API_Docs/`)
+- HITL workflow: submit feedback with `POST /api/v1/workflows/{id}/feedback`, gate status via `GET /api/v1/workflows/{id}/gate`
+- Monitoring workflow: usage summary via `GET /api/v1/monitoring/summary`, pricing via `GET /api/v1/monitoring/pricing`
+- Run backend server: `uvicorn app.main:app --reload --port 8000` or `python -m app.main`
+- Run backend tests: `pytest tests/ -v` (or specific tests via `python -m pytest tests/test_cache.py -v`)
+- Format/lint backend: `black app/ tests/`, `isort app/ tests/`, `ruff check app/ tests/`
+- Bulk tool template update script: `Backend/bulk_update_ingredients.sh`
+- Frontend dev server: `npm run dev` (or `yarn dev`, `pnpm dev`, `bun dev`)
