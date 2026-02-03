@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Zap, Star, Plus, Filter, Loader2, Trash2, FileText, Settings, Play, Sparkles } from 'lucide-react'
+import { Zap, Star, Plus, Filter, Loader2, Trash2, FileText, Settings, Play, Sparkles, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -38,10 +38,37 @@ interface ToolDetail extends Tool {
   video_prompt_template?: string
   parameters_schema?: any
   original_idea?: string
+  source_video_url?: string
   improvement_history?: Array<{ timestamp: string; previous_version: number; suggestion: string; changes_made?: string }>
 }
 
 interface ToolsListResponse { tools: Tool[]; total: number; limit?: number; offset?: number }
+
+interface ToolVideoAnalysis {
+  script_style: string
+  visual_style: string
+  camera_grammar: string
+  editing_pacing: string
+  audio_profile: string
+  text_overlay_style: string
+  key_motifs: string[]
+  negative_constraints: string[]
+  tool_idea: string
+  suggested_tool_name?: string
+}
+
+interface ToolVideoPreviewResponse {
+  draft_id: string
+  source_video_url: string
+  analysis: ToolVideoAnalysis
+  preview: {
+    tool_id: string
+    tool_name: string
+    category: string
+    description: string
+    reasoning?: string
+  }
+}
 
 export default function ToolsPage() {
   const qc = useQueryClient()
@@ -71,6 +98,26 @@ export default function ToolsPage() {
   const [preview, setPreview] = useState<any | null>(null)
   const [creating, setCreating] = useState(false)
   const [previewing, setPreviewing] = useState(false)
+
+  // Video-based tool creation state
+  const [openVideoCreate, setOpenVideoCreate] = useState(false)
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [videoToolName, setVideoToolName] = useState('')
+  const [videoCategory, setVideoCategory] = useState<string>('auto')
+  const [videoNotes, setVideoNotes] = useState('')
+  const [videoPreview, setVideoPreview] = useState<ToolVideoPreviewResponse | null>(null)
+  const [videoPreviewing, setVideoPreviewing] = useState(false)
+  const [videoCreating, setVideoCreating] = useState(false)
+
+  const resetVideoState = () => {
+    setVideoFile(null)
+    setVideoToolName('')
+    setVideoCategory('auto')
+    setVideoNotes('')
+    setVideoPreview(null)
+    setVideoPreviewing(false)
+    setVideoCreating(false)
+  }
 
   const handlePreview = async () => {
     if (!newName || !newIdea) {
@@ -109,6 +156,52 @@ export default function ToolsPage() {
       toast.error('Create failed', { description: e.message })
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleVideoPreview = async () => {
+    if (!videoFile) {
+      toast.error('Please select a reference video')
+      return
+    }
+    setVideoPreviewing(true)
+    try {
+      const form = new FormData()
+      form.append('reference_video', videoFile)
+      if (videoToolName) form.append('tool_name', videoToolName)
+      if (videoCategory !== 'auto') form.append('category', videoCategory)
+      if (videoNotes) form.append('notes', videoNotes)
+      const res = await api.postMultipart<ToolVideoPreviewResponse>('/tools/from-video/preview', form)
+      setVideoPreview(res)
+      toast.success('Video analysis complete')
+    } catch (e: any) {
+      toast.error('Video preview failed', { description: e.message })
+    } finally {
+      setVideoPreviewing(false)
+    }
+  }
+
+  const handleVideoCreate = async () => {
+    if (!videoPreview) {
+      toast.error('Preview the video first')
+      return
+    }
+    setVideoCreating(true)
+    try {
+      const body: any = { draft_id: videoPreview.draft_id }
+      if (videoToolName) body.tool_name = videoToolName
+      if (videoCategory !== 'auto') body.category = videoCategory
+      if (videoNotes) body.notes = videoNotes
+      const res = await api.post<ToolDetail>('/tools/from-video', body)
+      toast.success('Tool created', { description: res.tool_name })
+      setOpenVideoCreate(false)
+      resetVideoState()
+      await qc.invalidateQueries({ queryKey: ['tools'] })
+      setSelectedId(res.tool_id)
+    } catch (e: any) {
+      toast.error('Create failed', { description: e.message })
+    } finally {
+      setVideoCreating(false)
     }
   }
 
@@ -240,9 +333,14 @@ export default function ToolsPage() {
           <h1 className="text-3xl font-bold tracking-tight mb-1">Creative Tools</h1>
           <p className="text-muted-foreground">Manage, improve, and test video generation tools.</p>
         </div>
-        <Button onClick={() => setOpenCreate(true)}>
-          <Plus className="h-4 w-4 mr-2" /> New Tool
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setOpenVideoCreate(true)}>
+            <Video className="h-4 w-4 mr-2" /> From Video
+          </Button>
+          <Button onClick={() => setOpenCreate(true)}>
+            <Plus className="h-4 w-4 mr-2" /> New Tool
+          </Button>
+        </div>
       </div>
 
       <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -414,6 +512,180 @@ export default function ToolsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Create Tool From Video Dialog */}
+      <Dialog open={openVideoCreate} onOpenChange={(open) => { setOpenVideoCreate(open); if (!open) resetVideoState() }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl">Create Tool From Video</DialogTitle>
+            <DialogDescription className="text-base">Upload a short video, preview analysis, then create a tool.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Reference Video</Label>
+              <Input
+                type="file"
+                accept="video/mp4,video/quicktime,video/webm"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null
+                  setVideoFile(file)
+                  setVideoPreview(null)
+                }}
+              />
+              <p className="text-xs text-muted-foreground">Accepted: mp4, mov, webm. Max 50MB.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Tool Name (optional)</Label>
+                <Input
+                  value={videoToolName}
+                  onChange={e => { setVideoToolName(e.target.value); setVideoPreview(null) }}
+                  placeholder="e.g., Cinematic Macro Explainers"
+                  className="h-11"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Category (optional)</Label>
+                <Select value={videoCategory} onValueChange={(value) => { setVideoCategory(value); setVideoPreview(null) }}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Auto-detect" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-detect</SelectItem>
+                    <SelectItem value="realistic">Realistic</SelectItem>
+                    <SelectItem value="anime">Anime</SelectItem>
+                    <SelectItem value="animation">Animation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Notes (optional)</Label>
+              <Textarea
+                value={videoNotes}
+                onChange={e => { setVideoNotes(e.target.value); setVideoPreview(null) }}
+                rows={4}
+                placeholder="Constraints or adjustments (e.g., no on-screen text, faster pacing)"
+                className="resize-none"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={handleVideoPreview}
+                disabled={videoPreviewing || !videoFile}
+                className="min-w-[180px]"
+              >
+                {videoPreviewing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Preview Analysis
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleVideoCreate}
+                disabled={videoCreating || !videoPreview}
+                className="min-w-[160px]"
+              >
+                {videoCreating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Tool
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {videoPreview && (
+              <div className="space-y-6 border-t pt-6">
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Reference Video</Label>
+                  <video src={videoPreview.source_video_url} controls className="w-full rounded border" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Script Style</div>
+                    <div className="text-sm">{videoPreview.analysis.script_style}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Visual Style</div>
+                    <div className="text-sm">{videoPreview.analysis.visual_style}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Camera Grammar</div>
+                    <div className="text-sm">{videoPreview.analysis.camera_grammar}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Editing & Pacing</div>
+                    <div className="text-sm">{videoPreview.analysis.editing_pacing}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Audio Profile</div>
+                    <div className="text-sm">{videoPreview.analysis.audio_profile}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Text Overlay</div>
+                    <div className="text-sm">{videoPreview.analysis.text_overlay_style}</div>
+                  </div>
+                </div>
+                {(videoPreview.analysis.key_motifs?.length ?? 0) > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">Key Motifs</div>
+                    <div className="flex flex-wrap gap-2">
+                      {videoPreview.analysis.key_motifs.map((m, i) => (
+                        <Badge key={i} variant="secondary">{m}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(videoPreview.analysis.negative_constraints?.length ?? 0) > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">Negative Constraints</div>
+                    <div className="text-sm text-muted-foreground">
+                      {videoPreview.analysis.negative_constraints.join(', ')}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Derived Tool Idea</Label>
+                  <div className="p-4 bg-muted/30 rounded-lg border text-sm text-muted-foreground">
+                    {videoPreview.analysis.tool_idea}
+                  </div>
+                </div>
+                <div className="rounded-lg border-2 border-primary/20 bg-muted/50 p-5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary" className="capitalize text-sm px-3 py-1">
+                      {videoPreview.preview.category?.replace('_', ' ') || 'Uncategorized'}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground font-mono">{videoPreview.preview.tool_id}</span>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-lg mb-1">{videoPreview.preview.tool_name}</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{videoPreview.preview.description}</p>
+                  </div>
+                  {videoPreview.preview.reasoning && (
+                    <div className="rounded-md bg-background/50 p-3 border">
+                      <div className="text-xs font-medium mb-1 text-muted-foreground">AI Reasoning:</div>
+                      <div className="text-sm text-foreground">{videoPreview.preview.reasoning}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Tool Detail Dialog */}
       <Dialog open={!!selectedId} onOpenChange={(open) => open ? null : onCloseDetail()}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
@@ -525,6 +797,13 @@ export default function ToolsPage() {
                       <div className="p-4 bg-muted/30 rounded-lg border text-sm text-muted-foreground">
                         {editState.original_idea}
                       </div>
+                    </div>
+                  )}
+
+                  {editState.source_video_url && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Source Video</Label>
+                      <video src={editState.source_video_url} controls className="w-full rounded border" />
                     </div>
                   )}
                 </TabsContent>
