@@ -1718,6 +1718,7 @@ CREATE TABLE tools (
         'surreal_realism', 'high_octane_anime', 'stylized_3d'  -- Legacy (deprecated)
     )),
     description TEXT,
+    source_video_url TEXT,  -- Optional uploaded reference video for tool creation
     capabilities JSONB,  -- {flow_visualization, sakuga_style, etc.}
     prompt_templates JSONB,  -- {script_template, image_template, video_template}
     example_outputs TEXT[],

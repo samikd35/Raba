@@ -140,6 +140,7 @@ class ToolRegistry:
             video_prompt_template=record.get("video_prompt_template"),
             parameters_schema=record.get("parameters_schema"),
             original_idea=record.get("original_idea"),
+            source_video_url=record.get("source_video_url"),
             is_active=record.get("is_active", True),
             priority=record.get("priority", 0),
             version=record.get("version", 1),
@@ -157,6 +158,7 @@ class ToolRegistry:
         enhanced_tool: ToolEnhancementResponse,
         original_idea: str,
         created_by: Optional[str] = None,
+        source_video_url: Optional[str] = None,
     ) -> ToolResponse:
         """
         Create a new tool from enhanced data.
@@ -195,6 +197,7 @@ class ToolRegistry:
             "video_prompt_template": enhanced_tool.video_prompt_template,
             "parameters_schema": enhanced_tool.parameters_schema,
             "original_idea": original_idea,
+            "source_video_url": source_video_url,
             "is_active": True,
             "priority": 50,  # Default priority
             "version": 1,
