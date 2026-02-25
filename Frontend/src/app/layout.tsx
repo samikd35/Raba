@@ -1,46 +1,28 @@
-import './globals.css';
-import { Metadata } from "next";
-import { Outfit } from 'next/font/google';
-import { AppToaster } from '@/components/ui/AppToaster';
-import { Toaster as SonnerToaster } from 'sonner';
-import { NavigationLoadingProvider } from '@/context/NavigationLoadingContext';
-import NavigationLoadingOverlay from '@/components/NavigationLoadingOverlay';
-import Script from 'next/script';
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import { QueryProvider } from "@/components/providers/query-provider";
+import { ThemeProvider } from "@/components/providers/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 
-const outfit = Outfit({
+const geistSans = Geist({
+  variable: "--font-geist-sans",
   subsets: ["latin"],
-  variable: '--font-outfit',
-  weight: ['100', '200', '300', '400', '500', '600', '700', '800', '900'],
-  display: 'swap',
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Yuba - A Sounding Board for African Entrepreneurs",
-  description: "Get contextual and actionable market insights to validate your business ideas. Join early-stage founders building the next generation of African startups.",
-  metadataBase: new URL('https://www.yubanow.com'),
-  openGraph: {
-    title: "Yuba - A Sounding Board for African Entrepreneurs",
-    description: "Get contextual and actionable market insights to validate your business ideas. Join early-stage founders building the next generation of African startups.",
-    url: 'https://www.yubanow.com',
-    siteName: 'Yuba',
-    locale: 'en_US',
-    type: 'website',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: "Yuba - A Sounding Board for African Entrepreneurs",
-    description: "Get contextual and actionable market insights to validate your business ideas. Join early-stage founders building the next generation of African startups.",
-  },
-  icons: {
-    icon: [
-      { url: '/favicon.ico' },
-    ],
-    apple: [
-      { url: '/apple-touch-icon.png' },
-    ],
-  },
-  manifest: '/site.webmanifest',
+  title: "RABA - Viral Shorts Generator",
+  description: "AI-Powered Multi-Agent YouTube Shorts Generator",
 };
+
+import { Header } from "@/components/header";
+import { Sidebar } from "@/components/sidebar";
+// ... (imports)
 
 export default function RootLayout({
   children,
@@ -48,48 +30,33 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={outfit.variable}>
-      <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* YouTube preconnect for faster video loading */}
-        <link rel="preconnect" href="https://www.youtube.com" />
-        <link rel="preconnect" href="https://www.youtube-nocookie.com" />
-        <link rel="preconnect" href="https://i.ytimg.com" />
-        <link rel="preconnect" href="https://img.youtube.com" />
-      </head>
-      <body className={`${outfit.className} dark:bg-gray-900`}>
-        {/* Microsoft Clarity Analytics */}
-        {/* <Script id="clarity-script" strategy="afterInteractive">
-          {`
-            (function(c,l,a,r,i,t,y){
-              c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-              t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-              y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-            })(window, document, "clarity", "script", "un0k7woue7");
-          `}
-        </Script> */}
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased h-screen w-full bg-background font-sans overflow-hidden`}
+      >
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <QueryProvider>
+            <div className="flex flex-col h-screen w-full">
+              <Header />
+              <div className="flex flex-1 overflow-hidden">
+                <Sidebar />
+                <main className="flex-1 overflow-y-auto">
+                  <div className="container mx-auto p-8 max-w-7xl flex flex-col min-h-full">
+                    {children}
+                  </div>
+                </main>
 
-        <NavigationLoadingProvider>
-          {children}
-          <NavigationLoadingOverlay />
-          <AppToaster />
-          <SonnerToaster 
-            position="top-center"
-            richColors
-            closeButton
-            toastOptions={{
-              style: {
-                background: 'white',
-                color: '#0f172a',
-                border: '1px solid #e2e8f0',
-              },
-              className: 'dark:bg-gray-800 dark:text-white dark:border-gray-700',
-            }}
-          />
-        </NavigationLoadingProvider>
+              </div>
+            </div>
+            <Toaster richColors position="top-right" />
+          </QueryProvider>
+        </ThemeProvider>
       </body>
-    </html>
+    </html >
   );
 }
