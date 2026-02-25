@@ -1,1 +1,0 @@
-export { useSolutionCritic } from './useSolutionCritic';
